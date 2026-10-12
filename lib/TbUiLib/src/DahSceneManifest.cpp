@@ -133,6 +133,33 @@ std::uint64_t unsignedField(const QJsonObject& object, const char* key)
   return static_cast<std::uint64_t>(number);
 }
 
+std::int64_t signedField(const QJsonObject& object, const char* key)
+{
+  const auto value = object.value(key);
+  if (!value.isDouble())
+    throw JsonError{std::string{"Expected signed integer field: "} + key};
+  const auto number = value.toDouble();
+  if (
+    !std::isfinite(number) || std::floor(number) != number
+    || number < static_cast<double>(std::numeric_limits<std::int64_t>::min())
+    || number > static_cast<double>(std::numeric_limits<std::int64_t>::max()))
+    throw JsonError{std::string{"Invalid signed integer field: "} + key};
+  return static_cast<std::int64_t>(number);
+}
+
+std::string firstNameCandidate(const QJsonObject& object)
+{
+  const auto value = object.value("name_candidates");
+  if (!value.isArray())
+    throw JsonError{"Expected name_candidates array"};
+  const auto values = value.toArray();
+  if (values.empty())
+    return {};
+  if (!values.first().isString())
+    throw JsonError{"Native name candidate must be a string"};
+  return values.first().toString().toStdString();
+}
+
 QByteArray readFile(const std::filesystem::path& path)
 {
   auto file = QFile{QString::fromStdWString(path.wstring())};
@@ -649,6 +676,17 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
             placement.nativeList =
               "+0x"
               + (unsignedField(native.toObject(), "list_pointer_field") == 12 ? std::string{"0C"} : std::string{"10"});
+          if (native.toObject().contains("entity_id"))
+            placement.entityId = signedField(native.toObject(), "entity_id");
+          if (native.toObject().contains("tag_ids"))
+          {
+            for (const auto& tag : arrayField(native.toObject(), "tag_ids"))
+            {
+              if (!tag.isString())
+                throw JsonError{"Native placement tag id must be a string"};
+              placement.tagIds.push_back(tag.toString().toStdString());
+            }
+          }
         }
         const auto instanceColor = placementJson.value("instance_color_rgb_f32");
         if (!instanceColor.isUndefined())
@@ -1127,6 +1165,94 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
         result.objectives.size()
         != unsignedField(objectField(json, "counts"), "objective_definitions"))
         throw JsonError{"Objective definition count mismatch"};
+    }
+    if (json.contains("regions"))
+    {
+      for (const auto& value : arrayField(json, "regions"))
+      {
+        if (!value.isObject())
+          throw JsonError{"Native region must be an object"};
+        const auto entry = value.toObject();
+        auto region = DahSceneRegion{};
+        region.id = stringField(entry, "id");
+        region.name = firstNameCandidate(entry);
+        region.nameHash = stringField(entry, "name_hash");
+        region.nativeLayerHash = stringField(entry, "native_layer_hash");
+        const auto position = arrayField(entry, "position");
+        if (position.size() != 3)
+          throw JsonError{"Native region position must contain three numbers"};
+        for (auto i = 0; i < 3; ++i)
+        {
+          if (!position[i].isDouble() || !std::isfinite(position[i].toDouble()))
+            throw JsonError{"Native region position must be finite"};
+          region.position[static_cast<size_t>(i)] = position[i].toDouble();
+        }
+        const auto matrixRows = arrayField(entry, "world_to_region_matrix");
+        if (matrixRows.size() != 4)
+          throw JsonError{"Native world-to-region matrix must contain four rows"};
+        for (auto row = 0; row < 4; ++row)
+        {
+          if (!matrixRows[row].isArray() || matrixRows[row].toArray().size() != 4)
+            throw JsonError{
+              "Native world-to-region matrix row must contain four numbers"};
+          const auto columns = matrixRows[row].toArray();
+          for (auto column = 0; column < 4; ++column)
+          {
+            if (!columns[column].isDouble() || !std::isfinite(columns[column].toDouble()))
+              throw JsonError{"Native world-to-region matrix must be finite"};
+            region.worldToRegionMatrix[static_cast<size_t>(row * 4 + column)] =
+              columns[column].toDouble();
+          }
+        }
+        result.regions.push_back(std::move(region));
+      }
+    }
+    if (json.contains("spawn_layers"))
+    {
+      for (const auto& value : arrayField(json, "spawn_layers"))
+      {
+        if (!value.isObject())
+          throw JsonError{"Native mission layer must be an object"};
+        const auto entry = value.toObject();
+        result.layers.push_back(DahSceneLayer{
+          stringField(entry, "hash"),
+          firstNameCandidate(entry),
+          unsignedField(entry, "index"),
+          unsignedField(entry, "load_group"),
+          static_cast<std::uint64_t>(arrayField(entry, "placements").size()),
+          static_cast<std::uint64_t>(arrayField(entry, "script_calls").size())});
+      }
+    }
+    if (json.contains("entity_tags"))
+    {
+      for (const auto& value : arrayField(json, "entity_tags"))
+      {
+        if (!value.isObject())
+          throw JsonError{"Native entity tag must be an object"};
+        const auto entry = value.toObject();
+        auto tag = DahSceneEntityTag{
+          stringField(entry, "id"),
+          firstNameCandidate(entry),
+          stringField(entry, "name_hash"),
+          {}};
+        for (const auto& entity : arrayField(entry, "entity_ids"))
+        {
+          if (!entity.isDouble())
+            throw JsonError{"Native entity tag id must be an integer"};
+          const auto wrapper = QJsonObject{{"value", entity}};
+          tag.entityIds.push_back(signedField(wrapper, "value"));
+        }
+        result.entityTags.push_back(std::move(tag));
+      }
+    }
+    if (json.contains("unknowns"))
+    {
+      for (const auto& value : arrayField(json, "unknowns"))
+      {
+        if (!value.isString())
+          throw JsonError{"Unresolved native-system note must be a string"};
+        result.unresolvedSystems.push_back(value.toString().toStdString());
+      }
     }
     validateArea42Counts(result);
     return result;

@@ -324,6 +324,14 @@ QString placementDetail(const DahObjectPlacementInfo& placement)
   {
     result += QStringLiteral(" — list: ") + QString::fromStdString(placement.nativeList);
   }
+  if (placement.entityId)
+  {
+    result += QStringLiteral(" — entity: %1").arg(*placement.entityId);
+  }
+  if (!placement.tagIds.empty())
+  {
+    result += QStringLiteral(" — %1 native tag(s)").arg(placement.tagIds.size());
+  }
   return result;
 }
 
@@ -447,6 +455,94 @@ void appendObjectives(
       }
     }
     missionRoot->setExpanded(true);
+  }
+  root.setExpanded(true);
+}
+
+QString nativeName(
+  const std::string& name, const std::string& hash, const QString& unnamedKind)
+{
+  return name.empty()
+           ? QStringLiteral("%1 %2").arg(unnamedKind, QString::fromStdString(hash))
+           : QString::fromStdString(name);
+}
+
+void appendRegions(QTreeWidgetItem& root, const std::vector<DahRegionInfo>& regions)
+{
+  auto byLayer = std::map<std::string, std::vector<const DahRegionInfo*>>{};
+  for (const auto& region : regions)
+    byLayer[region.nativeLayerHash].push_back(&region);
+  for (const auto& [layer, records] : byLayer)
+  {
+    auto* layerRoot = new QTreeWidgetItem{
+      &root,
+      {QString::fromStdString(layer),
+       QStringLiteral("%1 native regions").arg(records.size())}};
+    for (const auto* region : records)
+    {
+      auto* item = new QTreeWidgetItem{
+        layerRoot,
+        {nativeName(region->name, region->nameHash, QStringLiteral("Unnamed region")),
+         QStringLiteral("center x %1, y %2, z %3 — %4")
+           .arg(region->position[0], 0, 'f', 2)
+           .arg(region->position[1], 0, 'f', 2)
+           .arg(region->position[2], 0, 'f', 2)
+           .arg(QString::fromStdString(region->id))}};
+      setNativeFocusPosition(*item, region->position);
+    }
+  }
+  root.setExpanded(true);
+}
+
+void appendLayers(QTreeWidgetItem& root, const std::vector<DahLayerInfo>& layers)
+{
+  for (const auto& layer : layers)
+  {
+    auto* item = new QTreeWidgetItem{
+      &root,
+      {nativeName(layer.name, layer.hash, QStringLiteral("Unnamed layer")),
+       QStringLiteral("index %1 — load group %2 — %3 placements — %4 script calls")
+         .arg(layer.index)
+         .arg(layer.loadGroup)
+         .arg(layer.placementCount)
+         .arg(layer.scriptCallCount)}};
+    item->setToolTip(
+      0,
+      QStringLiteral(
+        "Native layer hash %1. Visibility is authored by mission scripts and is not "
+        "simulated in this read-only scene.")
+        .arg(QString::fromStdString(layer.hash)));
+  }
+  root.setExpanded(true);
+}
+
+void appendEntityTags(QTreeWidgetItem& root, const std::vector<DahEntityTagInfo>& tags)
+{
+  for (const auto& tag : tags)
+  {
+    auto* item = new QTreeWidgetItem{
+      &root,
+      {nativeName(tag.name, tag.nameHash, QStringLiteral("Unnamed tag")),
+       QStringLiteral("%1 entity IDs — %2 resolved scene placements")
+         .arg(tag.entityIds.size())
+         .arg(tag.placementIds.size())}};
+    item->setToolTip(0, QString::fromStdString(tag.id));
+    for (const auto& placementId : tag.placementIds)
+    {
+      auto* link = new QTreeWidgetItem{
+        item,
+        {QString::fromStdString(placementId),
+         QStringLiteral("Existing native entity membership; double-click to focus")}};
+      link->setData(0, NativePlacementLinkRole, QString::fromStdString(placementId));
+    }
+    if (tag.placementIds.empty())
+    {
+      new QTreeWidgetItem{
+        item,
+        {QStringLiteral("No fixed placement link"),
+         QStringLiteral(
+           "Tag may reference runtime-created or otherwise unresolved entities")}};
+    }
   }
   root.setExpanded(true);
 }
@@ -646,7 +742,7 @@ void DahMapElements::updateStatus()
     m_status->setText(
       tr("%1: %2 world records, including %3 buildings, %4 props and %5 humans; "
          "%6 scatter instances, %7 native landing visuals, %8 editor markers and %9 "
-         "objective definitions. "
+         "objective definitions; %10 regions, %11 mission layers and %12 entity tags. "
          "Actors use authored reference poses. Native mission layers remain distinct; "
          "this is not a simulated mission state.")
         .arg(QString::fromStdString(scene->mapName))
@@ -657,7 +753,10 @@ void DahMapElements::updateStatus()
         .arg(scene->scatterPlacements.size())
         .arg(scene->landingPlacements.size())
         .arg(scene->markers.size())
-        .arg(scene->objectives.size()));
+        .arg(scene->objectives.size())
+        .arg(scene->regions.size())
+        .arg(scene->nativeLayers.size())
+        .arg(scene->entityTags.size()));
   }
   else
   {
@@ -783,6 +882,36 @@ void DahMapElements::updateNativeExpansion()
     scene->populationPlacements);
   populate(4, tr("Other Native World Records"), scene->otherWorldPlacements);
   populate(4, tr("Native Landing Site Visuals"), scene->landingPlacements);
+  if (!scene->regions.empty())
+  {
+    auto* root = new QTreeWidgetItem{
+      m_trees.at(1),
+      {tr("Native Spatial Regions"),
+       tr("%1 verified retail region records; overlays remain hidden until boundary "
+          "semantics are proven")
+         .arg(scene->regions.size())}};
+    m_nativeExpansionRoots.push_back(root);
+    appendRegions(*root, scene->regions);
+  }
+  if (!scene->nativeLayers.empty())
+  {
+    auto* root = new QTreeWidgetItem{
+      m_trees.at(4),
+      {tr("Native Mission / Load Layers"),
+       tr("%1 layers; authored membership shown without simulating activation")
+         .arg(scene->nativeLayers.size())}};
+    m_nativeExpansionRoots.push_back(root);
+    appendLayers(*root, scene->nativeLayers);
+  }
+  if (!scene->entityTags.empty())
+  {
+    auto* root = new QTreeWidgetItem{
+      m_trees.at(4),
+      {tr("Native Entity Tags"),
+       tr("%1 tag groups with stable entity membership").arg(scene->entityTags.size())}};
+    m_nativeExpansionRoots.push_back(root);
+    appendEntityTags(*root, scene->entityTags);
+  }
   auto* environmentRoot = new QTreeWidgetItem{
     m_trees.at(5),
     {tr("Native Environment Preview"),
@@ -799,6 +928,38 @@ void DahMapElements::updateNativeExpansion()
      tr("Live fog, local lights, reflections, shadows and mission-driven effects remain "
         "incomplete; they are not implied by this preview.")}};
   environmentRoot->setExpanded(true);
+  auto* coverageRoot = new QTreeWidgetItem{
+    m_trees.at(5),
+    {tr("Area 42 Support Coverage"),
+     tr("What this preview proves, preserves, and still lacks")}};
+  m_nativeExpansionRoots.push_back(coverageRoot);
+  new QTreeWidgetItem{
+    coverageRoot,
+    {tr("Native scene geometry"),
+     tr("92 terrain placements with both LODs; every fixed renderable world placement "
+        "is included")}};
+  new QTreeWidgetItem{
+    coverageRoot,
+    {tr("Native organization"),
+     tr("%1 regions, %2 mission/load layers and %3 entity tags are inspectable")
+       .arg(scene->regions.size())
+       .arg(scene->nativeLayers.size())
+       .arg(scene->entityTags.size())}};
+  new QTreeWidgetItem{
+    coverageRoot,
+    {tr("Editing / saving"),
+     tr("Read-only reconstruction. Collision, destruction graphs, mission execution, "
+        "streaming simulation and native package writes are not enabled.")}};
+  if (!scene->unresolvedSystems.empty())
+  {
+    auto* unresolved = new QTreeWidgetItem{
+      coverageRoot,
+      {tr("Known unresolved systems"),
+       tr("%1 explicit evidence gaps").arg(scene->unresolvedSystems.size())}};
+    for (const auto& issue : scene->unresolvedSystems)
+      new QTreeWidgetItem{unresolved, {tr("Open research item"), text(issue)}};
+  }
+  coverageRoot->setExpanded(true);
   populate(
     4,
     tr("Landing, Spawn & Objective Annotations (editor markers)"),

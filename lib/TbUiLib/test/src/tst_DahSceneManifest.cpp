@@ -246,6 +246,34 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     REQUIRE(directory.isValid());
     writeTestScene(directory.path());
 
+    auto json = readTestScene(directory.path());
+    json["regions"] = QJsonArray{QJsonObject{
+      {"id", "region:test"},
+      {"name_candidates", QJsonArray{"test_region"}},
+      {"name_hash", "0x00000001"},
+      {"native_layer_hash", "0x00000002"},
+      {"position", QJsonArray{1.0, 2.0, 3.0}},
+      {"world_to_region_matrix",
+       QJsonArray{
+         QJsonArray{1.0, 0.0, 0.0, 0.0},
+         QJsonArray{0.0, 1.0, 0.0, 0.0},
+         QJsonArray{0.0, 0.0, 1.0, 0.0},
+         QJsonArray{0.0, 0.0, 0.0, 1.0}}}}};
+    json["spawn_layers"] = QJsonArray{QJsonObject{
+      {"hash", "0x00000002"},
+      {"name_candidates", QJsonArray{"test_layer"}},
+      {"index", 0},
+      {"load_group", 0},
+      {"placements", QJsonArray{QJsonObject{}}},
+      {"script_calls", QJsonArray{QJsonObject{}, QJsonObject{}}}}};
+    json["entity_tags"] = QJsonArray{QJsonObject{
+      {"id", "tag:test"},
+      {"name_candidates", QJsonArray{"test_tag"}},
+      {"name_hash", "0x00000003"},
+      {"entity_ids", QJsonArray{42}}}};
+    json["unknowns"] = QJsonArray{"collision remains unresolved"};
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+
     const auto result = loadDahSceneManifest(directory.path().toStdWString());
     REQUIRE(std::holds_alternative<DahSceneManifest>(result));
     const auto& scene = std::get<DahSceneManifest>(result);
@@ -255,6 +283,16 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(scene.placements.front().lods.front().geometryId == "geometry:test");
     CHECK(scene.materials.front().addressU == DahSceneMaterial::AddressMode::ClampToEdge);
     CHECK(scene.materials.front().addressV == DahSceneMaterial::AddressMode::Repeat);
+    REQUIRE(scene.regions.size() == 1);
+    CHECK(scene.regions.front().position == std::array<double, 3>{1.0, 2.0, 3.0});
+    REQUIRE(scene.layers.size() == 1);
+    CHECK(scene.layers.front().placementCount == 1);
+    CHECK(scene.layers.front().scriptCallCount == 2);
+    REQUIRE(scene.entityTags.size() == 1);
+    CHECK(scene.entityTags.front().entityIds == std::vector<std::int64_t>{42});
+    CHECK(
+      scene.unresolvedSystems
+      == std::vector<std::string>{"collision remains unresolved"});
   }
 
   SECTION("builds a placed native triangle reference")
@@ -667,6 +705,12 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(scene.landingPlacements.front().lods.front().parts.size() == 11);
       CHECK(scene.objectPlacements.front().nativeLayer == "0x8F651465");
       CHECK(scene.objectPlacements.front().nativeList == "+0x0C");
+      REQUIRE(scene.objectPlacements.front().entityId);
+      CHECK(*scene.objectPlacements.front().entityId == 39662);
+      CHECK(scene.regions.size() == 92);
+      CHECK(scene.layers.size() == 41);
+      CHECK(scene.entityTags.size() == 135);
+      CHECK(scene.unresolvedSystems.size() == 9);
       CHECK(scene.objectPlacements.front().lods.front().parts.size() == 13);
 
       const auto referenceResult = buildDahSceneReference(scene, 0);

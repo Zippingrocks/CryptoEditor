@@ -101,6 +101,36 @@ struct DahObjectPlacementInfo
   std::string status;
   std::string nativeLayer;
   std::string nativeList;
+  std::optional<std::int64_t> entityId;
+  std::vector<std::string> tagIds;
+};
+
+struct DahRegionInfo
+{
+  std::string id;
+  std::string name;
+  std::string nameHash;
+  std::string nativeLayerHash;
+  std::array<double, 3> position{};
+};
+
+struct DahLayerInfo
+{
+  std::string hash;
+  std::string name;
+  std::uint64_t index = 0;
+  std::uint64_t loadGroup = 0;
+  std::uint64_t placementCount = 0;
+  std::uint64_t scriptCallCount = 0;
+};
+
+struct DahEntityTagInfo
+{
+  std::string id;
+  std::string name;
+  std::string nameHash;
+  std::vector<std::int64_t> entityIds;
+  std::vector<std::string> placementIds;
 };
 
 struct DahObjectiveTargetInfo
@@ -152,6 +182,10 @@ struct DahSceneInfo
   std::vector<DahObjectPlacementInfo> otherWorldPlacements;
   std::vector<DahObjectPlacementInfo> landingPlacements;
   std::vector<DahObjectiveInfo> objectives;
+  std::vector<DahRegionInfo> regions;
+  std::vector<DahLayerInfo> nativeLayers;
+  std::vector<DahEntityTagInfo> entityTags;
+  std::vector<std::string> unresolvedSystems;
 };
 
 class MapDocument

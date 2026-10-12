@@ -144,6 +144,12 @@ TEST_CASE("DahMapElements", "[DahMapElements]")
       {"world-placement:14:0001"},
       {"0xC4F70679"}});
     info.objectives.push_back(std::move(objective));
+    info.regions.push_back(DahRegionInfo{
+      "region:test", "b1_building", "0x00000001", "0xC4F70679", {25, 50, 75}});
+    info.nativeLayers.push_back(DahLayerInfo{"0xC4F70679", "m1_part1", 2, 0, 37, 4});
+    info.entityTags.push_back(DahEntityTagInfo{
+      "tag:test", "b1_psimutants", "0x00000002", {44140}, {"world-placement:14:0001"}});
+    info.unresolvedSystems.push_back("Collision remains unresolved.");
     auto* layer = document.map().worldNode().defaultLayer();
     document.setDahSceneReference(
       std::move(info),
@@ -178,7 +184,7 @@ TEST_CASE("DahMapElements", "[DahMapElements]")
     CHECK(focusPosition[0].toDouble() == 25.0);
     CHECK(focusPosition[1].toDouble() == 50.0);
     CHECK(focusPosition[2].toDouble() == 75.0);
-    CHECK(named("world-placement:14:0001").size() == 1);
+    CHECK(named("world-placement:14:0001").size() == 2);
     CHECK(named("world-placement:00:0940").size() == 1);
     CHECK(
       named("world-placement:00:0940")
@@ -194,6 +200,35 @@ TEST_CASE("DahMapElements", "[DahMapElements]")
     CHECK(named("world-placement:02:0130").size() == 1);
     CHECK(named("Collectible Probes (authored placements)").size() == 1);
     CHECK(named("Mission Debris Pickups (authored placements)").size() == 1);
+    CHECK(named("Native Mission / Load Layers").size() == 1);
+    CHECK(named("m1_part1").front()->text(1).contains("37 placements"));
+    CHECK(named("Native Entity Tags").size() == 1);
+    CHECK(named("b1_psimutants").front()->text(1).contains("1 resolved"));
+
+    auto* worldTree = inspector.findChild<QTreeWidget*>("DahMapElements_WorldTree");
+    REQUIRE(worldTree != nullptr);
+    auto worldNamed = [&](const QString& label) {
+      auto matches = std::vector<QTreeWidgetItem*>{};
+      for (auto item = QTreeWidgetItemIterator{worldTree}; *item; ++item)
+        if ((*item)->text(0) == label)
+          matches.push_back(*item);
+      return matches;
+    };
+    CHECK(worldNamed("Native Spatial Regions").size() == 1);
+    CHECK(worldNamed("b1_building").size() == 1);
+
+    auto* systemsTree = inspector.findChild<QTreeWidget*>("DahMapElements_SystemsTree");
+    REQUIRE(systemsTree != nullptr);
+    auto systemNamed = [&](const QString& label) {
+      auto matches = std::vector<QTreeWidgetItem*>{};
+      for (auto item = QTreeWidgetItemIterator{systemsTree}; *item; ++item)
+        if ((*item)->text(0) == label)
+          matches.push_back(*item);
+      return matches;
+    };
+    CHECK(systemNamed("Area 42 Support Coverage").size() == 1);
+    CHECK(
+      systemNamed("Known unresolved systems").front()->text(1).contains("1 explicit"));
   }
 }
 

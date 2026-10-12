@@ -108,6 +108,36 @@ struct DahScenePlacement
   std::string nativeLayer;
   std::string nativeList;
   std::string lightRole;
+  std::optional<std::int64_t> entityId;
+  std::vector<std::string> tagIds;
+};
+
+struct DahSceneRegion
+{
+  std::string id;
+  std::string name;
+  std::string nameHash;
+  std::string nativeLayerHash;
+  std::array<double, 3> position{};
+  std::array<double, 16> worldToRegionMatrix{};
+};
+
+struct DahSceneLayer
+{
+  std::string hash;
+  std::string name;
+  std::uint64_t index = 0;
+  std::uint64_t loadGroup = 0;
+  std::uint64_t placementCount = 0;
+  std::uint64_t scriptCallCount = 0;
+};
+
+struct DahSceneEntityTag
+{
+  std::string id;
+  std::string name;
+  std::string nameHash;
+  std::vector<std::int64_t> entityIds;
 };
 
 struct DahSceneMarker
@@ -244,6 +274,10 @@ struct DahSceneManifest
   std::vector<DahSceneSun> suns;
   std::vector<DahSceneMarker> markers;
   std::vector<DahSceneObjective> objectives;
+  std::vector<DahSceneRegion> regions;
+  std::vector<DahSceneLayer> layers;
+  std::vector<DahSceneEntityTag> entityTags;
+  std::vector<std::string> unresolvedSystems;
 };
 
 struct DahSceneLoadError

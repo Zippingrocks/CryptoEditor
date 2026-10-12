@@ -461,7 +461,9 @@ bool AppController::openDocument(const std::filesystem::path& path)
                      !placement.lods.empty(),
                      placement.previewStatus,
                      placement.nativeLayer,
-                     placement.nativeList});
+                     placement.nativeList,
+                     placement.entityId,
+                     placement.tagIds});
                  }
                  else if (placement.editorCollection == "props")
                  {
@@ -473,7 +475,9 @@ bool AppController::openDocument(const std::filesystem::path& path)
                      !placement.lods.empty(),
                      placement.previewStatus,
                      placement.nativeLayer,
-                     placement.nativeList});
+                     placement.nativeList,
+                     placement.entityId,
+                     placement.tagIds});
                  }
                }
                auto info = DahSceneInfo{
@@ -539,7 +543,9 @@ bool AppController::openDocument(const std::filesystem::path& path)
                    !placement.lods.empty(),
                    placement.previewStatus,
                    placement.nativeLayer,
-                   placement.nativeList});
+                   placement.nativeList,
+                   placement.entityId,
+                   placement.tagIds});
                }
                for (const auto& placement : manifest.scatterPlacements)
                {
@@ -598,6 +604,40 @@ bool AppController::openDocument(const std::filesystem::path& path)
                  }
                  info.objectives.push_back(std::move(entry));
                }
+               for (const auto& region : manifest.regions)
+               {
+                 info.regions.push_back(DahRegionInfo{
+                   region.id,
+                   region.name,
+                   region.nameHash,
+                   region.nativeLayerHash,
+                   region.position});
+               }
+               for (const auto& layer : manifest.layers)
+               {
+                 info.nativeLayers.push_back(DahLayerInfo{
+                   layer.hash,
+                   layer.name,
+                   layer.index,
+                   layer.loadGroup,
+                   layer.placementCount,
+                   layer.scriptCallCount});
+               }
+               for (const auto& tag : manifest.entityTags)
+               {
+                 auto entry =
+                   DahEntityTagInfo{tag.id, tag.name, tag.nameHash, tag.entityIds, {}};
+                 for (const auto entityId : tag.entityIds)
+                 {
+                   for (const auto& placement : manifest.objectPlacements)
+                   {
+                     if (placement.entityId == entityId)
+                       entry.placementIds.push_back(placement.id);
+                   }
+                 }
+                 info.entityTags.push_back(std::move(entry));
+               }
+               info.unresolvedSystems = manifest.unresolvedSystems;
                auto lod0Renderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                auto lod1Renderer =
