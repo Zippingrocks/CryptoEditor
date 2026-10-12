@@ -12,6 +12,7 @@ target_sources(TbUiLibTest
     ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_CompilationRunner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_CompilationTaskListBox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_DahSceneManifest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_DahMapElements.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_ViewEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_EntityDefinitionFileChooser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_EntityPropertyModel.cpp

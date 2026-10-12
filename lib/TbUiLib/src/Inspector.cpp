@@ -24,6 +24,7 @@
 #include <QIODevice>
 #include <QVBoxLayout>
 
+#include "ui/DahMapElements.h"
 #include "ui/EntityInspector.h"
 #include "ui/FaceInspector.h"
 #include "ui/MapInspector.h"
@@ -44,10 +45,12 @@ Inspector::Inspector(AppController& appController, MapDocument& document, QWidge
   m_mapInspector = new MapInspector{document};
   m_entityInspector = new EntityInspector{appController, document};
   m_faceInspector = new FaceInspector{appController, document};
+  m_dahMapElements = new DahMapElements{document};
 
   m_tabBook->addPage(m_mapInspector, "Map");
   m_tabBook->addPage(m_entityInspector, "Entity");
   m_tabBook->addPage(m_faceInspector, "Face");
+  m_tabBook->addPage(m_dahMapElements, "Elements");
 
   auto* layout = new QVBoxLayout{};
   layout->setContentsMargins(0, 0, 0, 0);

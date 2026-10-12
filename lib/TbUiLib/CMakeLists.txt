@@ -46,6 +46,7 @@ target_sources(TbUiLib
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CyclingMapView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/DahSceneManifest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/DahSceneReference.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/DahMapElements.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/DialogButtonLayout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/DialogHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/DrawShapeToolExtensionPage.cpp
@@ -232,6 +233,7 @@ target_sources(TbUiLib
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/CyclingMapView.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/DahSceneManifest.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/DahSceneReference.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/DahMapElements.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/DialogButtonLayout.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/DialogHeader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/DrawShapeToolExtensionPage.h

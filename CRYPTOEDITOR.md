@@ -59,6 +59,17 @@ Native save, autosave, revert, and misleading map/OBJ exports are disabled for
 this document type. A converted heightmap or Battlefront `.wld`/`.ter` file must
 never become the authoritative representation of a DAH map.
 
+The **Elements** inspector establishes the DAH-native content taxonomy. Its
+**Buildings** tab separates human residential, civic/commercial,
+industrial/agricultural, military/government, infrastructure, and modular
+structures from Furon architecture. Neighboring World, Props, Actors, Gameplay,
+and Systems tabs keep terrain, set dressing, spawns, mission logic, collision,
+destruction, streaming, effects, audio, and preserved unknown records from being
+flattened into one asset list. The catalog is searchable and deliberately does
+not invent retail asset identities; building placement remains disabled until
+the native scenery reader supplies verified resources and dependencies. See
+[`DAH_MAP_ELEMENTS.md`](DAH_MAP_ELEMENTS.md).
+
 ## Delivery sequence
 
 1. Keep the upstream editor building and tested on Windows.
