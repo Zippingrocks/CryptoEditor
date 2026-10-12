@@ -65,6 +65,10 @@ LayerEditor::LayerEditor(MapDocument& document, QWidget* parent)
 
 void LayerEditor::onSetCurrentLayer(mdl::LayerNode* layerNode)
 {
+  if (!canSetCurrentLayer(layerNode))
+  {
+    return;
+  }
   setCurrentLayer(m_document.map(), layerNode);
 
   updateButtons();
@@ -72,7 +76,8 @@ void LayerEditor::onSetCurrentLayer(mdl::LayerNode* layerNode)
 
 bool LayerEditor::canSetCurrentLayer(mdl::LayerNode* layerNode) const
 {
-  return mdl::canSetCurrentLayer(m_document.map(), layerNode);
+  return !m_document.isDahSceneLayer(layerNode)
+         && mdl::canSetCurrentLayer(m_document.map(), layerNode);
 }
 
 void LayerEditor::onLayerRightClick(mdl::LayerNode* layerNode)
@@ -122,6 +127,7 @@ void LayerEditor::onLayerRightClick(mdl::LayerNode* layerNode)
   isolateLayerAction->setEnabled(canIsolateLayers(m_document.map(), {layerNode}));
   toggleLayerOmitFromExportAction->setCheckable(true);
   toggleLayerOmitFromExportAction->setChecked(layerNode->layer().omitFromExport());
+  toggleLayerOmitFromExportAction->setEnabled(!m_document.isDahSceneLayer(layerNode));
 
   toggleLayerLockedAction->setEnabled(canToggleLayerLocked());
   showAllLayersAction->setEnabled(canShowAllLayers());
@@ -156,12 +162,17 @@ void LayerEditor::toggleLayerVisible(mdl::LayerNode* layerNode)
 
 bool LayerEditor::canToggleLayerLocked() const
 {
-  return m_layerList->selectedLayer() != nullptr;
+  const auto* layer = m_layerList->selectedLayer();
+  return layer != nullptr && !m_document.isDahSceneLayer(layer);
 }
 
 void LayerEditor::toggleLayerLocked(mdl::LayerNode* layerNode)
 {
   contract_pre(layerNode != nullptr);
+  if (m_document.isDahSceneLayer(layerNode))
+  {
+    return;
+  }
 
   auto& map = m_document.map();
   if (!layerNode->locked())
@@ -177,6 +188,10 @@ void LayerEditor::toggleLayerLocked(mdl::LayerNode* layerNode)
 void LayerEditor::toggleOmitLayerFromExport(mdl::LayerNode* layerNode)
 {
   contract_pre(layerNode != nullptr);
+  if (m_document.isDahSceneLayer(layerNode))
+  {
+    return;
+  }
 
   setOmitLayerFromExport(
     m_document.map(), layerNode, !layerNode->layer().omitFromExport());
@@ -287,7 +302,8 @@ void LayerEditor::onRemoveLayer()
 bool LayerEditor::canRemoveLayer() const
 {
   if (const auto* layerNode = m_layerList->selectedLayer();
-      layerNode && findVisibleAndUnlockedLayer(layerNode))
+      layerNode && !m_document.isDahSceneLayer(layerNode)
+      && findVisibleAndUnlockedLayer(layerNode))
   {
     return (layerNode != m_document.map().worldNode().defaultLayer());
   }
@@ -312,7 +328,8 @@ bool LayerEditor::canRenameLayer() const
 {
   if (const auto* layerNode = m_layerList->selectedLayer())
   {
-    return (layerNode != m_document.map().worldNode().defaultLayer());
+    return layerNode != m_document.map().worldNode().defaultLayer()
+           && !m_document.isDahSceneLayer(layerNode);
   }
   return false;
 }
@@ -321,7 +338,8 @@ bool LayerEditor::canMoveLayer(const int direction) const
 {
   if (auto* layerNode = m_layerList->selectedLayer(); layerNode && direction != 0)
   {
-    return mdl::canMoveLayer(m_document.map(), layerNode, direction);
+    return !m_document.isDahSceneLayer(layerNode)
+           && mdl::canMoveLayer(m_document.map(), layerNode, direction);
   }
   return false;
 }
@@ -383,14 +401,18 @@ void LayerEditor::onUnlockAllLayers()
 {
   auto& map = m_document.map();
 
-  const auto layers = map.worldNode().allLayers();
+  auto layers = map.worldNode().allLayers();
+  std::erase_if(
+    layers, [&](const auto* layer) { return m_document.isDahSceneLayer(layer); });
   resetNodeLockingState(map, kdl::vec_static_cast<mdl::Node*>(layers));
 }
 
 bool LayerEditor::canUnlockAllLayers() const
 {
   const auto layers = m_document.map().worldNode().allLayers();
-  return std::ranges::any_of(layers, [](const auto* layer) { return layer->locked(); });
+  return std::ranges::any_of(layers, [&](const auto* layer) {
+    return !m_document.isDahSceneLayer(layer) && layer->locked();
+  });
 }
 
 mdl::LayerNode* LayerEditor::findVisibleAndUnlockedLayer(

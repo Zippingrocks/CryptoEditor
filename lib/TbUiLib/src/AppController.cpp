@@ -39,8 +39,13 @@
 #include "gl/VboManager.h"
 #include "mdl/EnvironmentConfig.h"
 #include "mdl/GameManager.h"
+#include "mdl/Layer.h"
+#include "mdl/LayerNode.h"
+#include "mdl/Map.h"
 #include "mdl/MapFormat.h"
 #include "mdl/MapHeader.h"
+#include "mdl/Node.h"
+#include "mdl/WorldNode.h"
 #include "prefs/Preferences.h"
 #include "ui/AboutDialog.h"
 #include "ui/ActionManager.h"
@@ -97,6 +102,21 @@ std::optional<std::filesystem::path> dahSceneDirectoryForPath(
     return path.parent_path();
   }
   return std::nullopt;
+}
+
+mdl::LayerNode* addDahDisplayLayer(
+  mdl::Map& map,
+  std::string name,
+  const int sortIndex,
+  const mdl::VisibilityState visibility)
+{
+  auto layer = mdl::Layer{std::move(name)};
+  layer.setSortIndex(sortIndex);
+  auto* layerNode = new mdl::LayerNode{std::move(layer)};
+  map.worldNode().addChild(layerNode);
+  layerNode->setLockState(mdl::LockState::Locked);
+  layerNode->setVisibilityState(visibility);
+  return layerNode;
 }
 
 auto createEnvironmentConfig()
@@ -394,45 +414,77 @@ bool AppController::openDocument(const std::filesystem::path& path)
                }
                auto manifest = std::get<DahSceneManifest>(std::move(manifestResult));
 
-               auto referenceResult = buildDahSceneReference(manifest, 0);
-               if (std::holds_alternative<DahSceneLoadError>(referenceResult))
+               auto lod0Result = buildDahSceneReference(manifest, 0);
+               if (std::holds_alternative<DahSceneLoadError>(lod0Result))
                {
                  return Result<bool>{Error{fmt::format(
-                   "Could not build DAH terrain reference: {}",
-                   std::get<DahSceneLoadError>(referenceResult).message)}};
+                   "Could not build DAH terrain LOD0 reference: {}",
+                   std::get<DahSceneLoadError>(lod0Result).message)}};
                }
-               auto reference = std::get<DahSceneReference>(std::move(referenceResult));
+               auto lod1Result = buildDahSceneReference(manifest, 1);
+               if (std::holds_alternative<DahSceneLoadError>(lod1Result))
+               {
+                 return Result<bool>{Error{fmt::format(
+                   "Could not build DAH terrain LOD1 reference: {}",
+                   std::get<DahSceneLoadError>(lod1Result).message)}};
+               }
+               auto lod0Reference = std::get<DahSceneReference>(std::move(lod0Result));
+               auto lod1Reference = std::get<DahSceneReference>(std::move(lod1Result));
                const auto* gameInfo = gameManager().gameInfo("Generic");
                if (gameInfo == nullptr)
                {
                  return Result<bool>{Error{"Generic game configuration is unavailable"}};
                }
 
-               const auto size = reference.bounds.size();
+               const auto sceneBounds =
+                 vm::merge(lod0Reference.bounds, lod1Reference.bounds);
+               const auto size = sceneBounds.size();
                const auto margin =
                  std::max({1024.0, size.x() * 0.05, size.y() * 0.05, size.z() * 0.05});
-               const auto worldBounds = reference.bounds.expand(margin);
+               const auto worldBounds = sceneBounds.expand(margin);
                const auto info = DahSceneInfo{
                  *sceneDirectory,
                  manifest.profileId,
                  manifest.mapName,
-                 reference.bounds,
+                 sceneBounds,
                  manifest.counts.placements,
                  manifest.counts.lods,
                  manifest.counts.geometries,
-                 reference.nativeTriangleCount,
-                 reference.lodIndex};
-               auto renderer =
+                 {lod0Reference.nativeTriangleCount, lod1Reference.nativeTriangleCount}};
+               auto lod0Renderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>(
-                   createDahSceneReferenceRenderer(std::move(reference)));
+                   createDahSceneReferenceRenderer(std::move(lod0Reference)));
+               auto lod1Renderer =
+                 std::make_shared<std::unique_ptr<render::DirectRenderable>>(
+                   createDahSceneReferenceRenderer(std::move(lod1Reference)));
 
                return m_mapWindowManager->createDocument(
                         *gameInfo, mdl::MapFormat::Valve, worldBounds)
-                      | kdl::transform([&, info, renderer]() {
+                      | kdl::transform([&, info, lod0Renderer, lod1Renderer]() {
                           auto* mapWindow = m_mapWindowManager->topMapWindow();
                           contract_assert(mapWindow != nullptr);
+                          auto& map = mapWindow->document().map();
+                          auto* editorLayer = map.worldNode().defaultLayer();
+                          auto editorLayerContents = editorLayer->layer();
+                          editorLayerContents.setName("Editor Geometry");
+                          editorLayer->setLayer(std::move(editorLayerContents));
+
+                          auto* lod0Layer = addDahDisplayLayer(
+                            map,
+                            "DAH Native Terrain — LOD0",
+                            0,
+                            mdl::VisibilityState::Shown);
+                          auto* lod1Layer = addDahDisplayLayer(
+                            map,
+                            "DAH Native Terrain — LOD1",
+                            1,
+                            mdl::VisibilityState::Hidden);
                           mapWindow->document().setDahSceneReference(
-                            info, std::move(*renderer));
+                            info,
+                            lod0Layer,
+                            std::move(*lod0Renderer),
+                            lod1Layer,
+                            std::move(*lod1Renderer));
                           m_welcomeWindow->close();
                           return true;
                         });

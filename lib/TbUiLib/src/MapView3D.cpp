@@ -572,9 +572,14 @@ void MapView3D::renderMap(
   render::RenderBatch& renderBatch)
 {
   renderer.render(renderContext, renderBatch);
-  if (auto* dahSceneRenderer = m_document.dahSceneRenderer())
+  for (auto lodIndex = 0u; lodIndex < 2u; ++lodIndex)
   {
-    renderBatch.add(dahSceneRenderer);
+    const auto* layer = m_document.dahSceneLayer(lodIndex);
+    auto* dahSceneRenderer = m_document.dahSceneRenderer(lodIndex);
+    if (layer != nullptr && layer->visible() && dahSceneRenderer != nullptr)
+    {
+      renderBatch.add(dahSceneRenderer);
+    }
   }
 
   const auto& map = m_document.map();

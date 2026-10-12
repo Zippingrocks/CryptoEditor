@@ -26,6 +26,7 @@
 #include "vm/bbox.h"
 #include "vm/polygon.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -53,6 +54,7 @@ namespace mdl
 {
 class Autosaver;
 class Command;
+class LayerNode;
 class Map;
 class Node;
 class PickResult;
@@ -98,8 +100,7 @@ struct DahSceneInfo
   std::uint64_t placementCount = 0;
   std::uint64_t lodCount = 0;
   std::uint64_t geometryCount = 0;
-  std::uint64_t nativeTriangleCount = 0;
-  std::uint64_t displayedLod = 0;
+  std::array<std::uint64_t, 2> nativeTriangleCounts{};
 };
 
 class MapDocument
@@ -178,7 +179,10 @@ private:
 
   std::unique_ptr<render::MapRenderer> m_mapRenderer;
   std::optional<DahSceneInfo> m_dahSceneInfo;
-  std::unique_ptr<render::DirectRenderable> m_dahSceneRenderer;
+  mdl::LayerNode* m_dahSceneLod0Layer = nullptr;
+  mdl::LayerNode* m_dahSceneLod1Layer = nullptr;
+  std::unique_ptr<render::DirectRenderable> m_dahSceneLod0Renderer;
+  std::unique_ptr<render::DirectRenderable> m_dahSceneLod1Renderer;
 
   NotifierConnection m_notifierConnection;
 
@@ -238,9 +242,16 @@ public: // accessors and such
   const render::MapRenderer& mapRenderer() const;
 
   void setDahSceneReference(
-    DahSceneInfo info, std::unique_ptr<render::DirectRenderable> renderer);
+    DahSceneInfo info,
+    mdl::LayerNode* lod0Layer,
+    std::unique_ptr<render::DirectRenderable> lod0Renderer,
+    mdl::LayerNode* lod1Layer,
+    std::unique_ptr<render::DirectRenderable> lod1Renderer);
   const DahSceneInfo* dahSceneInfo() const;
-  render::DirectRenderable* dahSceneRenderer() const;
+  mdl::LayerNode* dahSceneLayer(std::uint64_t lodIndex) const;
+  render::DirectRenderable* dahSceneRenderer(std::uint64_t lodIndex) const;
+  std::optional<std::uint64_t> dahSceneLodForLayer(const mdl::LayerNode* layer) const;
+  bool isDahSceneLayer(const mdl::LayerNode* layer) const;
   bool isDahScene() const;
 
   Logger& logger();

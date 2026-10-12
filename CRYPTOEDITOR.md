@@ -46,9 +46,11 @@ by `dahdev`. CryptoEditor has a strict manifest loader that verifies the
 schema, read-only marker, package and buffer-view hashes, path containment,
 geometry references, collection counts, and Area 42's exact native geometry
 counts before accepting a scene. It opens an accepted scene as a read-only DAH
-reference document, decodes the native LOD0 triangle views, applies all 92
-placement matrices, frames the terrain in the 3D viewport, and retains the
-ordinary empty brush layer for future authored geometry. Native save, autosave,
+reference document, decodes both native terrain LODs, applies all 92 placement
+matrices, frames the terrain in the 3D viewport, and exposes locked LOD0 and
+LOD1 display layers alongside an ordinary editor-geometry layer. The Layers
+panel's eye controls switch either native LOD on or off; LOD0 is initially shown
+and LOD1 is initially hidden. Native save, autosave,
 revert, and misleading map/OBJ exports are disabled for this document type. A
 converted heightmap or Battlefront `.wld`/`.ter` file must never become the
 authoritative representation of a DAH map.
@@ -57,14 +59,24 @@ authoritative representation of a DAH map.
 
 1. Keep the upstream editor building and tested on Windows.
 2. **Complete:** connect the verified `.dahscene` loader to a read-only DAH
-   document-open path and render all 92 native terrain placements at LOD0.
-3. **In progress:** add LOD switching, candidate UVs, material batches, and
-   decoded textures; report unresolved dependencies explicitly.
+   document-open path and render all 92 native terrain placements at both LODs.
+3. **In progress:** add candidate UVs, material batches, and decoded textures;
+   report unresolved dependencies explicitly.
 4. Add terrain selection and inspection without changing package data.
 5. Add brush-to-native geometry workflows alongside native terrain editing.
 6. Prove byte-preserving unchanged serialization.
 7. Prove one controlled object move on a disposable game copy.
 8. Expand to collision, destruction, missions, streaming, and new-map creation.
+
+## Scene organization
+
+CryptoEditor reuses the editor's existing flat layers for map-wide visibility,
+locking, ordering, and export policy. Native DAH display data is represented by
+locked display layers, while future authored brushes and objects remain in
+ordinary editable layers. Nested groups provide the folder-like hierarchy for
+authored objects. A separate Photoshop-style nested-layer implementation is not
+needed until DAH-specific workflows demonstrate a limitation in this combined
+layer-and-group model.
 
 DAH1 US Xbox retail Area 42 is the reference target. DAH2 retail and prototype
 builds receive separate adapters until evidence proves which structures are

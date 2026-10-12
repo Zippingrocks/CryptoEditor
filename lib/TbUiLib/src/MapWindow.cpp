@@ -128,6 +128,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <iterator>
 #include <stdexcept>
 #include <string>
@@ -772,11 +773,24 @@ void MapWindow::updateStatusBar()
 {
   if (const auto* scene = m_document->dahSceneInfo())
   {
-    m_statusBarLabel->setText(tr("   DAH reference   |   %1 placements   |   LOD%2   |   "
-                                 "%3 native triangles   |   read only")
+    auto visibleLods = QStringList{};
+    auto visibleTriangles = std::uint64_t{0};
+    for (auto lodIndex = 0u; lodIndex < 2u; ++lodIndex)
+    {
+      const auto* layer = m_document->dahSceneLayer(lodIndex);
+      if (layer != nullptr && layer->visible())
+      {
+        visibleLods.push_back(tr("LOD%1").arg(lodIndex));
+        visibleTriangles += scene->nativeTriangleCounts[lodIndex];
+      }
+    }
+    const auto lodDescription =
+      visibleLods.empty() ? tr("terrain hidden") : visibleLods.join(" + ");
+    m_statusBarLabel->setText(tr("   DAH reference   |   %1 placements   |   %2   |   "
+                                 "%3 visible native triangles   |   read only")
                                 .arg(scene->placementCount)
-                                .arg(scene->displayedLod)
-                                .arg(scene->nativeTriangleCount));
+                                .arg(lodDescription)
+                                .arg(visibleTriangles));
     return;
   }
   m_statusBarLabel->setText(QString{describeSelection(m_document->map())});
@@ -1174,6 +1188,10 @@ bool MapWindow::exportDocument(const mdl::ExportOptions& options)
  */
 bool MapWindow::confirmOrDiscardChanges()
 {
+  if (documentReadOnly())
+  {
+    return true;
+  }
   const auto& map = m_document->map();
   if (!map.modified())
   {

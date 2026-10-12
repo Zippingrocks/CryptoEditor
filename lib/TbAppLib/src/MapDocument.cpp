@@ -180,7 +180,10 @@ void MapDocument::triggerAutosave()
 void MapDocument::setMap(std::unique_ptr<mdl::Map> map)
 {
   m_dahSceneInfo = std::nullopt;
-  m_dahSceneRenderer = nullptr;
+  m_dahSceneLod0Layer = nullptr;
+  m_dahSceneLod1Layer = nullptr;
+  m_dahSceneLod0Renderer = nullptr;
+  m_dahSceneLod1Renderer = nullptr;
   m_map = std::move(map);
   m_mapRenderer = std::make_unique<render::MapRenderer>(*m_map);
   m_autosaver = std::make_unique<mdl::Autosaver>(*m_map);
@@ -221,11 +224,21 @@ const render::MapRenderer& MapDocument::mapRenderer() const
 }
 
 void MapDocument::setDahSceneReference(
-  DahSceneInfo info, std::unique_ptr<render::DirectRenderable> renderer)
+  DahSceneInfo info,
+  mdl::LayerNode* lod0Layer,
+  std::unique_ptr<render::DirectRenderable> lod0Renderer,
+  mdl::LayerNode* lod1Layer,
+  std::unique_ptr<render::DirectRenderable> lod1Renderer)
 {
-  contract_pre(renderer != nullptr);
+  contract_pre(lod0Layer != nullptr);
+  contract_pre(lod0Renderer != nullptr);
+  contract_pre(lod1Layer != nullptr);
+  contract_pre(lod1Renderer != nullptr);
   m_dahSceneInfo = std::move(info);
-  m_dahSceneRenderer = std::move(renderer);
+  m_dahSceneLod0Layer = lod0Layer;
+  m_dahSceneLod1Layer = lod1Layer;
+  m_dahSceneLod0Renderer = std::move(lod0Renderer);
+  m_dahSceneLod1Renderer = std::move(lod1Renderer);
   documentWasLoadedNotifier();
 }
 
@@ -234,9 +247,38 @@ const DahSceneInfo* MapDocument::dahSceneInfo() const
   return m_dahSceneInfo ? &*m_dahSceneInfo : nullptr;
 }
 
-render::DirectRenderable* MapDocument::dahSceneRenderer() const
+mdl::LayerNode* MapDocument::dahSceneLayer(const std::uint64_t lodIndex) const
 {
-  return m_dahSceneRenderer.get();
+  return lodIndex == 0   ? m_dahSceneLod0Layer
+         : lodIndex == 1 ? m_dahSceneLod1Layer
+                         : nullptr;
+}
+
+render::DirectRenderable* MapDocument::dahSceneRenderer(
+  const std::uint64_t lodIndex) const
+{
+  return lodIndex == 0   ? m_dahSceneLod0Renderer.get()
+         : lodIndex == 1 ? m_dahSceneLod1Renderer.get()
+                         : nullptr;
+}
+
+std::optional<std::uint64_t> MapDocument::dahSceneLodForLayer(
+  const mdl::LayerNode* layer) const
+{
+  if (layer != nullptr && layer == m_dahSceneLod0Layer)
+  {
+    return 0;
+  }
+  if (layer != nullptr && layer == m_dahSceneLod1Layer)
+  {
+    return 1;
+  }
+  return std::nullopt;
+}
+
+bool MapDocument::isDahSceneLayer(const mdl::LayerNode* layer) const
+{
+  return dahSceneLodForLayer(layer).has_value();
 }
 
 bool MapDocument::isDahScene() const

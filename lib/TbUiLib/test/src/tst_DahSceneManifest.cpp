@@ -243,6 +243,13 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(reference.placementCount == 92);
       CHECK(reference.nativeTriangleCount == 103634);
       CHECK(reference.vertices.size() == 310902);
+
+      const auto lod1Result = buildDahSceneReference(scene, 1);
+      REQUIRE(std::holds_alternative<DahSceneReference>(lod1Result));
+      const auto& lod1Reference = std::get<DahSceneReference>(lod1Result);
+      CHECK(lod1Reference.placementCount == 92);
+      CHECK(lod1Reference.nativeTriangleCount == 8120);
+      CHECK(lod1Reference.vertices.size() == 24360);
     }
   }
 }

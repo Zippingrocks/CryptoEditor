@@ -127,16 +127,27 @@ void LayerListBoxWidget::updateLayerItem()
     setUnemphasizedSTyle(m_nameText);
   }
 
-  const auto info = tr("%1 %2")
-                      .arg(m_layer->childCount())
-                      .arg(m_layer->childCount() == 1 ? "object" : "objects");
+  auto info = tr("%1 %2")
+                .arg(m_layer->childCount())
+                .arg(m_layer->childCount() == 1 ? "object" : "objects");
+  const auto dahLod = m_document.dahSceneLodForLayer(m_layer);
+  if (dahLod)
+  {
+    const auto* scene = m_document.dahSceneInfo();
+    info = tr("%1 placements, %2 native triangles")
+             .arg(scene->placementCount)
+             .arg(scene->nativeTriangleCounts[*dahLod]);
+  }
   m_infoText->setText(info);
 
   // Update buttons
   m_activeButton->setChecked(editorContext.currentLayer() == m_layer);
+  m_activeButton->setEnabled(!dahLod);
   m_lockButton->setChecked(m_layer->locked());
+  m_lockButton->setEnabled(!dahLod);
   m_hiddenButton->setChecked(m_layer->hidden());
   m_omitFromExportButton->setChecked(m_layer->layer().omitFromExport());
+  m_omitFromExportButton->setEnabled(!dahLod);
 }
 
 mdl::LayerNode* LayerListBoxWidget::layer() const
