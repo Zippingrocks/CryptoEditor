@@ -97,6 +97,9 @@ DahSceneReferenceResult buildDahSceneReference(
 // Editor annotations only; these triangles are never native game geometry.
 DahSceneReference buildDahSceneMarkerReference(const DahSceneManifest& manifest);
 
+// Proven retail region membership volumes; editor visualization only.
+DahSceneReference buildDahSceneRegionReference(const DahSceneManifest& manifest);
+
 std::unique_ptr<render::DirectRenderable> createDahSceneReferenceRenderer(
   DahSceneReference reference, gl::ResourceManager& resourceManager);
 

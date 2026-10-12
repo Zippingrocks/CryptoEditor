@@ -1204,6 +1204,23 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
               columns[column].toDouble();
           }
         }
+        const auto inverseRows = arrayField(entry, "region_to_world_matrix");
+        if (inverseRows.size() != 4)
+          throw JsonError{"Native region-to-world matrix must contain four rows"};
+        for (auto row = 0; row < 4; ++row)
+        {
+          if (!inverseRows[row].isArray() || inverseRows[row].toArray().size() != 4)
+            throw JsonError{
+              "Native region-to-world matrix row must contain four numbers"};
+          const auto columns = inverseRows[row].toArray();
+          for (auto column = 0; column < 4; ++column)
+          {
+            if (!columns[column].isDouble() || !std::isfinite(columns[column].toDouble()))
+              throw JsonError{"Native region-to-world matrix must be finite"};
+            region.regionToWorldMatrix[static_cast<size_t>(row * 4 + column)] =
+              columns[column].toDouble();
+          }
+        }
         result.regions.push_back(std::move(region));
       }
     }

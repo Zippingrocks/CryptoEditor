@@ -258,6 +258,12 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
          QJsonArray{1.0, 0.0, 0.0, 0.0},
          QJsonArray{0.0, 1.0, 0.0, 0.0},
          QJsonArray{0.0, 0.0, 1.0, 0.0},
+         QJsonArray{0.0, 0.0, 0.0, 1.0}}},
+      {"region_to_world_matrix",
+       QJsonArray{
+         QJsonArray{1.0, 0.0, 0.0, 0.0},
+         QJsonArray{0.0, 1.0, 0.0, 0.0},
+         QJsonArray{0.0, 0.0, 1.0, 0.0},
          QJsonArray{0.0, 0.0, 0.0, 1.0}}}}};
     json["spawn_layers"] = QJsonArray{QJsonObject{
       {"hash", "0x00000002"},
@@ -285,6 +291,13 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(scene.materials.front().addressV == DahSceneMaterial::AddressMode::Repeat);
     REQUIRE(scene.regions.size() == 1);
     CHECK(scene.regions.front().position == std::array<double, 3>{1.0, 2.0, 3.0});
+    const auto regionReference = buildDahSceneRegionReference(scene);
+    CHECK(regionReference.vertexCount() == 36);
+    CHECK(regionReference.nativeTriangleCount == 0);
+    CHECK(regionReference.placementCount == 0);
+    REQUIRE(regionReference.batches.size() == 1);
+    CHECK(regionReference.batches.front().alphaMode == "blend");
+    CHECK_FALSE(regionReference.batches.front().state.depthWrite);
     REQUIRE(scene.layers.size() == 1);
     CHECK(scene.layers.front().placementCount == 1);
     CHECK(scene.layers.front().scriptCallCount == 2);

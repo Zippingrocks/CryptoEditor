@@ -120,6 +120,7 @@ struct DahSceneRegion
   std::string nativeLayerHash;
   std::array<double, 3> position{};
   std::array<double, 16> worldToRegionMatrix{};
+  std::array<double, 16> regionToWorldMatrix{};
 };
 
 struct DahSceneLayer

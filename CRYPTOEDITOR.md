@@ -134,6 +134,12 @@ assets that are absent from the retail map. Native placement editing remains
 disabled until the unchanged-save gate supplies a verified writer. See
 [`DAH_MAP_ELEMENTS.md`](DAH_MAP_ELEMENTS.md).
 
+The layer panel also exposes all 92 native mission regions as a separate,
+hidden-by-default translucent overlay. These are not guessed extents: the
+retail executable transforms points by each native matrix and tests all three
+local coordinates inclusively against `-1` and `+1`. Spawn/landing markers,
+region volumes, LOD0, and LOD1 therefore remain independently switchable.
+
 ## Delivery sequence
 
 1. Keep the upstream editor building and tested on Windows.
@@ -148,16 +154,19 @@ disabled until the unchanged-save gate supplies a verified writer. See
    buildings, 1,468 props, multipart reference visuals, 15,121 scatter instances,
    295 human reference meshes and three native landing visuals. Preserve
    unresolved runtime behavior explicitly rather than inventing it.
-5. **Next:** compare representative terrain against matching in-game locations,
+5. **Complete offline foundations:** attest the region membership routine,
+   account for all 7,804 resources across 42 type families, and prove a safe
+   byte-identical passthrough copy (not yet a semantic writer).
+6. **Next:** compare representative terrain against matching in-game locations,
    resolve remaining visual differences, then add terrain selection and
    inspection without changing package data.
-6. Verify native lighting/fog/culling, actor and landing animation, collision
+7. Verify native lighting/fog/culling, actor and landing animation, collision
    projection, destruction states and scatter dynamics, then connect scene
    selection to preserved object records.
-7. Add brush-to-native geometry workflows alongside native terrain editing.
-8. Prove byte-preserving unchanged serialization.
-9. Prove one controlled object move on a disposable game copy.
-10. Expand to collision, destruction, missions, streaming, and new-map creation.
+8. Add brush-to-native geometry workflows alongside native terrain editing.
+9. Prove semantic unchanged serialization while preserving unknown bytes.
+10. Prove one controlled object move on a disposable game copy.
+11. Expand to collision, destruction, missions, streaming, and new-map creation.
 
 ## Scene organization
 

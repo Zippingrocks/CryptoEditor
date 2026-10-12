@@ -644,6 +644,8 @@ bool AppController::openDocument(const std::filesystem::path& path)
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                auto markerRenderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
+               auto regionRenderer =
+                 std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                try
                {
                  *lod0Renderer = createDahSceneReferenceRenderer(
@@ -652,6 +654,8 @@ bool AppController::openDocument(const std::filesystem::path& path)
                    std::move(lod1Reference), glManager().resourceManager());
                  *markerRenderer = createDahSceneReferenceRenderer(
                    buildDahSceneMarkerReference(manifest), glManager().resourceManager());
+                 *regionRenderer = createDahSceneReferenceRenderer(
+                   buildDahSceneRegionReference(manifest), glManager().resourceManager());
                }
                catch (const std::exception& error)
                {
@@ -661,8 +665,12 @@ bool AppController::openDocument(const std::filesystem::path& path)
 
                return m_mapWindowManager->createDocument(
                         *gameInfo, mdl::MapFormat::Valve, worldBounds)
-                      | kdl::transform(
-                        [&, info, lod0Renderer, lod1Renderer, markerRenderer]() {
+                      | kdl::transform([&,
+                                        info,
+                                        lod0Renderer,
+                                        lod1Renderer,
+                                        markerRenderer,
+                                        regionRenderer]() {
                           auto* mapWindow = m_mapWindowManager->topMapWindow();
                           contract_assert(mapWindow != nullptr);
                           auto& map = mapWindow->document().map();
@@ -686,6 +694,11 @@ bool AppController::openDocument(const std::filesystem::path& path)
                             "Landing Sites & Entity Spawns — Editor Markers",
                             2,
                             mdl::VisibilityState::Shown);
+                          auto* regionLayer = addDahDisplayLayer(
+                            map,
+                            "Native Mission Regions — Proven Volumes",
+                            3,
+                            mdl::VisibilityState::Hidden);
                           mapWindow->document().setDahSceneReference(
                             info,
                             lod0Layer,
@@ -693,7 +706,9 @@ bool AppController::openDocument(const std::filesystem::path& path)
                             lod1Layer,
                             std::move(*lod1Renderer),
                             markerLayer,
-                            std::move(*markerRenderer));
+                            std::move(*markerRenderer),
+                            regionLayer,
+                            std::move(*regionRenderer));
                           m_welcomeWindow->close();
                           return true;
                         });

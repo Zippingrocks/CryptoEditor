@@ -572,7 +572,7 @@ void MapView3D::renderMap(
   render::RenderBatch& renderBatch)
 {
   renderer.render(renderContext, renderBatch);
-  for (auto lodIndex = 0u; lodIndex < 3u; ++lodIndex)
+  for (auto lodIndex = 0u; lodIndex < 4u; ++lodIndex)
   {
     const auto* layer = m_document.dahSceneLayer(lodIndex);
     auto* dahSceneRenderer = m_document.dahSceneRenderer(lodIndex);

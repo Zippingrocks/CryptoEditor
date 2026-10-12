@@ -913,4 +913,66 @@ DahSceneReference buildDahSceneMarkerReference(const DahSceneManifest& manifest)
   return result;
 }
 
+DahSceneReference buildDahSceneRegionReference(const DahSceneManifest& manifest)
+{
+  auto result = DahSceneReference{};
+  auto batch = DahSceneReferenceBatch{};
+  batch.materialId = "editor-marker:native-region-volumes";
+  batch.alphaMode = "blend";
+  batch.state.alphaMode = "blend";
+  batch.state.depthWrite = false;
+  const auto color = vm::vec4f{0.12f, 0.78f, 1.0f, 0.14f};
+  auto haveBounds = false;
+  auto boundsMin = vm::vec3d{};
+  auto boundsMax = vm::vec3d{};
+
+  for (const auto& region : manifest.regions)
+  {
+    const std::array<vm::vec3f, 8> local = {
+      vm::vec3f{-1, -1, -1},
+      vm::vec3f{1, -1, -1},
+      vm::vec3f{1, 1, -1},
+      vm::vec3f{-1, 1, -1},
+      vm::vec3f{-1, -1, 1},
+      vm::vec3f{1, -1, 1},
+      vm::vec3f{1, 1, 1},
+      vm::vec3f{-1, 1, 1}};
+    auto points = std::array<vm::vec3f, 8>{};
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+      points[i] = transformPosition(local[i], region.regionToWorldMatrix);
+      const auto p = vm::vec3d{points[i]};
+      if (!haveBounds)
+      {
+        boundsMin = boundsMax = p;
+        haveBounds = true;
+      }
+      else
+      {
+        boundsMin = vm::min(boundsMin, p);
+        boundsMax = vm::max(boundsMax, p);
+      }
+    }
+    constexpr std::array<std::array<size_t, 4>, 6> Faces = {{
+      {{0, 3, 2, 1}},
+      {{4, 5, 6, 7}},
+      {{0, 1, 5, 4}},
+      {{1, 2, 6, 5}},
+      {{2, 3, 7, 6}},
+      {{3, 0, 4, 7}},
+    }};
+    for (const auto& face : Faces)
+    {
+      const auto normal = faceNormal(points[face[0]], points[face[1]], points[face[2]]);
+      for (const auto index : {face[0], face[1], face[2], face[0], face[2], face[3]})
+        batch.vertices.emplace_back(points[index], normal, vm::vec2f{}, color);
+    }
+  }
+  if (!batch.vertices.empty())
+    result.batches.push_back(std::move(batch));
+  if (haveBounds)
+    result.bounds = vm::bbox3d{boundsMin, boundsMax};
+  return result;
+}
+
 } // namespace tb::ui

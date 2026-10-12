@@ -270,6 +270,8 @@ private:
   std::unique_ptr<render::DirectRenderable> m_dahSceneLod1Renderer;
   mdl::LayerNode* m_dahSceneMarkerLayer = nullptr;
   std::unique_ptr<render::DirectRenderable> m_dahSceneMarkerRenderer;
+  mdl::LayerNode* m_dahSceneRegionLayer = nullptr;
+  std::unique_ptr<render::DirectRenderable> m_dahSceneRegionRenderer;
 
   NotifierConnection m_notifierConnection;
 
@@ -335,7 +337,9 @@ public: // accessors and such
     mdl::LayerNode* lod1Layer,
     std::unique_ptr<render::DirectRenderable> lod1Renderer,
     mdl::LayerNode* markerLayer = nullptr,
-    std::unique_ptr<render::DirectRenderable> markerRenderer = nullptr);
+    std::unique_ptr<render::DirectRenderable> markerRenderer = nullptr,
+    mdl::LayerNode* regionLayer = nullptr,
+    std::unique_ptr<render::DirectRenderable> regionRenderer = nullptr);
   const DahSceneInfo* dahSceneInfo() const;
   mdl::LayerNode* dahSceneLayer(std::uint64_t lodIndex) const;
   render::DirectRenderable* dahSceneRenderer(std::uint64_t lodIndex) const;
