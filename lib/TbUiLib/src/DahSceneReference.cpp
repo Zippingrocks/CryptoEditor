@@ -23,12 +23,21 @@
 #include <QtEndian>
 
 #include "base/Color.h"
+#include "base/PreferenceManager.h"
+#include "gl/ActiveShader.h"
+#include "gl/Camera.h"
 #include "gl/GlInterface.h"
+#include "gl/Material.h"
 #include "gl/PrimType.h"
+#include "gl/ResourceManager.h"
+#include "gl/Shaders.h"
+#include "gl/Texture.h"
+#include "gl/TextureResource.h"
 #include "gl/VertexArray.h"
+#include "mdl/LoadImageTexture.h"
+#include "prefs/Preferences.h"
 #include "render/RenderContext.h"
 #include "render/Renderable.h"
-#include "render/TriangleRenderer.h"
 
 #include "vm/vec.h"
 
@@ -49,7 +58,7 @@ QByteArray readBuffer(const std::filesystem::path& path)
   auto file = QFile{QString::fromStdWString(path.wstring())};
   if (!file.open(QIODevice::ReadOnly))
   {
-    throw std::runtime_error{"Could not read DAH scene buffer: " + path.string()};
+    throw std::runtime_error{"Could not read DAH scene payload: " + path.string()};
   }
   return file.readAll();
 }
@@ -100,35 +109,155 @@ vm::vec3f faceNormal(const vm::vec3f& a, const vm::vec3f& b, const vm::vec3f& c)
   return normal.z() < 0.0f ? -normal : normal;
 }
 
+Color fallbackColor(const std::string& materialId)
+{
+  auto hash = std::uint32_t{2166136261u};
+  for (const auto character : materialId)
+  {
+    hash = (hash ^ static_cast<unsigned char>(character)) * 16777619u;
+  }
+  const auto channel = [&](const unsigned int shift) {
+    return 0.3f + 0.5f * static_cast<float>((hash >> shift) & 0xffu) / 255.0f;
+  };
+  return Color{RgbaF{channel(0), channel(8), channel(16), 1.0f}};
+}
+
+std::shared_ptr<gl::TextureResource> loadTextureResource(
+  const std::filesystem::path& path, gl::ResourceManager& resourceManager)
+{
+  const auto bytes = readBuffer(path);
+  auto textureResult = mdl::loadImageTextureFromMemory(
+    reinterpret_cast<const std::uint8_t*>(bytes.constData()),
+    static_cast<size_t>(bytes.size()));
+  if (textureResult.is_error())
+  {
+    throw std::runtime_error{"Could not decode DAH texture preview: " + path.string()};
+  }
+  auto resource = gl::createTextureResource(std::move(textureResult).value());
+  resourceManager.addResource(resource);
+  return resource;
+}
+
+struct RenderBatch
+{
+  gl::VertexArray vertexArray;
+  std::unique_ptr<gl::Material> material;
+  Color fallback;
+
+  RenderBatch(
+    std::vector<DahSceneReferenceBatch::Vertex> vertices,
+    std::string materialId,
+    std::shared_ptr<gl::TextureResource> textureResource)
+    : vertexArray{gl::VertexArray::move(std::move(vertices))}
+    , material{textureResource ? std::make_unique<gl::Material>(materialId, std::move(textureResource)) : nullptr}
+    , fallback{fallbackColor(materialId)}
+  {
+  }
+};
+
 class DahReferenceRenderer : public render::DirectRenderable
 {
 private:
-  render::TriangleRenderer m_triangles;
+  std::vector<RenderBatch> m_batches;
 
 public:
-  explicit DahReferenceRenderer(std::vector<DahSceneReference::Vertex> vertices)
-    : m_triangles{gl::VertexArray::move(std::move(vertices)), gl::PrimType::Triangles}
+  DahReferenceRenderer(DahSceneReference reference, gl::ResourceManager& resourceManager)
   {
-    m_triangles.setUseColor(true);
-    m_triangles.setColor(Color{RgbaF{0.32f, 0.66f, 0.82f, 1.0f}});
+    auto resources =
+      std::unordered_map<std::string, std::shared_ptr<gl::TextureResource>>{};
+    m_batches.reserve(reference.batches.size());
+    for (auto& batch : reference.batches)
+    {
+      auto textureResource = std::shared_ptr<gl::TextureResource>{};
+      if (batch.texturePreviewPath)
+      {
+        const auto key = batch.texturePreviewPath->generic_string();
+        const auto [it, inserted] = resources.try_emplace(key);
+        if (inserted)
+        {
+          it->second = loadTextureResource(*batch.texturePreviewPath, resourceManager);
+        }
+        textureResource = it->second;
+      }
+      m_batches.emplace_back(
+        std::move(batch.vertices), std::move(batch.materialId), textureResource);
+    }
   }
 
   void prepare(gl::Gl& gl, gl::VboManager& vboManager) override
   {
-    m_triangles.prepare(gl, vboManager);
+    for (auto& batch : m_batches)
+    {
+      batch.vertexArray.prepare(gl, vboManager);
+    }
   }
 
   void render(render::RenderContext& context) override
   {
     auto& gl = context.gl();
+    auto shader = gl::ActiveShader{gl, context.shaderManager(), gl::Shaders::FaceShader};
+    auto& prefs = PreferenceManager::instance();
+
     gl.disable(GL_CULL_FACE);
     gl.polygonMode(GL_FRONT_AND_BACK, GL_FILL);
-    m_triangles.render(context);
+    gl.enable(GL_TEXTURE_2D);
+    gl.activeTexture(GL_TEXTURE0);
+    shader.set("Brightness", prefs.get(Preferences::Brightness));
+    shader.set("RenderGrid", context.showGrid());
+    shader.set("GridSize", static_cast<float>(context.gridSize()));
+    shader.set("GridAlpha", prefs.get(Preferences::GridAlpha));
+    shader.set("Material", 0);
+    shader.set("ApplyTinting", false);
+    shader.set("GrayScale", false);
+    shader.set("CameraPosition", context.camera().position());
+    shader.set("ShadeFaces", context.shadeFaces());
+    shader.set("ShowFog", context.showFog());
+    shader.set("Alpha", 1.0f);
+    shader.set("EnableMasked", false);
+    shader.set("AlphaFuncCompare", size_t{0});
+    shader.set("AlphaFuncThreshold", 0.5f);
+    shader.set("ShowSoftMapBounds", !context.softMapBounds().is_empty());
+    shader.set("SoftMapBoundsMin", context.softMapBounds().min);
+    shader.set("SoftMapBoundsMax", context.softMapBounds().max);
+    shader.set(
+      "SoftMapBoundsColor",
+      RgbaF{prefs.get(Preferences::SoftMapBoundsColor).to<RgbF>(), 0.1f});
+
+    for (auto& batch : m_batches)
+    {
+      const auto* texture = gl::getTexture(batch.material.get());
+      const auto applyMaterial = context.showMaterials() && texture != nullptr;
+      shader.set("ApplyMaterial", applyMaterial);
+      shader.set("Color", texture ? texture->averageColor() : batch.fallback);
+      if (applyMaterial)
+      {
+        batch.material->activate(gl, context.minFilterMode(), context.magFilterMode());
+      }
+      if (batch.vertexArray.setup(gl, shader.program()))
+      {
+        batch.vertexArray.render(gl, gl::PrimType::Triangles);
+        batch.vertexArray.cleanup(gl, shader.program());
+      }
+      if (applyMaterial)
+      {
+        batch.material->deactivate(gl);
+      }
+    }
     gl.enable(GL_CULL_FACE);
   }
 };
 
 } // namespace
+
+std::uint64_t DahSceneReference::vertexCount() const
+{
+  auto result = std::uint64_t{0};
+  for (const auto& batch : batches)
+  {
+    result += batch.vertices.size();
+  }
+  return result;
+}
 
 DahSceneReferenceResult buildDahSceneReference(
   const DahSceneManifest& manifest, const std::uint64_t lodIndex)
@@ -141,13 +270,20 @@ DahSceneReferenceResult buildDahSceneReference(
     {
       geometries.emplace(geometry.id, &geometry);
     }
+    auto materials = std::unordered_map<std::string, const DahSceneMaterial*>{};
+    for (const auto& material : manifest.materials)
+    {
+      materials.emplace(material.id, &material);
+    }
+    auto textures = std::unordered_map<std::string, std::filesystem::path>{};
+    for (const auto& texture : manifest.textures)
+    {
+      textures.emplace(texture.id, texture.previewPath);
+    }
 
     auto result = DahSceneReference{};
     result.lodIndex = lodIndex;
-    result.vertices.reserve(
-      static_cast<size_t>(
-        lodIndex == 0 ? manifest.counts.lod0Triangles : manifest.counts.lod1Triangles)
-      * 3u);
+    auto batchIndices = std::unordered_map<std::string, size_t>{};
 
     auto haveBounds = false;
     auto boundsMin = vm::vec3d{};
@@ -195,7 +331,9 @@ DahSceneReferenceResult buildDahSceneReference(
       }
 
       auto positions = std::vector<vm::vec3f>{};
+      auto uvs = std::vector<vm::vec2f>{};
       positions.reserve(static_cast<size_t>(geometry.vertexCount));
+      uvs.reserve(static_cast<size_t>(geometry.vertexCount));
       for (std::uint64_t i = 0; i < geometry.vertexCount; ++i)
       {
         const auto offset = geometry.vertices.offset + i * 24u;
@@ -205,30 +343,66 @@ DahSceneReferenceResult buildDahSceneReference(
             readF32(buffer, offset + 4u),
             readF32(buffer, offset + 8u)},
           placement.matrix));
+        uvs.emplace_back(readF32(buffer, offset + 12u), readF32(buffer, offset + 16u));
       }
 
-      for (std::uint64_t i = 0; i < geometry.triangleCount; ++i)
+      auto triangleCursor = std::uint64_t{0};
+      for (const auto& segment : geometry.segmentRecords)
       {
-        const auto offset = geometry.triangles.offset + i * 12u;
-        const auto index0 = readU32(buffer, offset);
-        const auto index1 = readU32(buffer, offset + 4u);
-        const auto index2 = readU32(buffer, offset + 8u);
-        if (
-          index0 >= positions.size() || index1 >= positions.size()
-          || index2 >= positions.size())
+        const auto& materialId = lodIt->materialSlots.at(segment.materialSlot);
+        auto [batchIt, inserted] =
+          batchIndices.try_emplace(materialId, result.batches.size());
+        if (inserted)
         {
-          throw std::runtime_error{"DAH scene triangle index is out of range"};
+          const auto materialIt = materials.find(materialId);
+          if (materialIt == materials.end())
+          {
+            throw std::runtime_error{"DAH scene segment references missing material"};
+          }
+          auto texturePreviewPath = std::optional<std::filesystem::path>{};
+          if (materialIt->second->textureId)
+          {
+            const auto textureIt = textures.find(*materialIt->second->textureId);
+            if (textureIt == textures.end())
+            {
+              throw std::runtime_error{"DAH scene material references missing texture"};
+            }
+            texturePreviewPath = textureIt->second;
+            ++result.texturedMaterialCount;
+          }
+          result.batches.push_back(
+            DahSceneReferenceBatch{materialId, texturePreviewPath, {}});
         }
-        const auto& a = positions[index0];
-        const auto& b = positions[index1];
-        const auto& c = positions[index2];
-        const auto normal = faceNormal(a, b, c);
-        result.vertices.emplace_back(a, normal);
-        result.vertices.emplace_back(b, normal);
-        result.vertices.emplace_back(c, normal);
-        addToBounds(a);
-        addToBounds(b);
-        addToBounds(c);
+        auto& batch = result.batches[batchIt->second];
+
+        for (std::uint64_t i = 0; i < segment.triangleCount; ++i)
+        {
+          const auto offset = geometry.triangles.offset + triangleCursor * 12u;
+          const auto index0 = readU32(buffer, offset);
+          const auto index1 = readU32(buffer, offset + 4u);
+          const auto index2 = readU32(buffer, offset + 8u);
+          if (
+            index0 >= positions.size() || index1 >= positions.size()
+            || index2 >= positions.size())
+          {
+            throw std::runtime_error{"DAH scene triangle index is out of range"};
+          }
+          const auto& a = positions[index0];
+          const auto& b = positions[index1];
+          const auto& c = positions[index2];
+          const auto normal = faceNormal(a, b, c);
+          batch.vertices.emplace_back(a, normal, uvs[index0]);
+          batch.vertices.emplace_back(b, normal, uvs[index1]);
+          batch.vertices.emplace_back(c, normal, uvs[index2]);
+          addToBounds(a);
+          addToBounds(b);
+          addToBounds(c);
+          ++triangleCursor;
+        }
+      }
+      if (triangleCursor != geometry.triangleCount)
+      {
+        throw std::runtime_error{"DAH scene segments do not cover all triangles"};
       }
       result.nativeTriangleCount += geometry.triangleCount;
       ++result.placementCount;
@@ -248,9 +422,9 @@ DahSceneReferenceResult buildDahSceneReference(
 }
 
 std::unique_ptr<render::DirectRenderable> createDahSceneReferenceRenderer(
-  DahSceneReference reference)
+  DahSceneReference reference, gl::ResourceManager& resourceManager)
 {
-  return std::make_unique<DahReferenceRenderer>(std::move(reference.vertices));
+  return std::make_unique<DahReferenceRenderer>(std::move(reference), resourceManager);
 }
 
 } // namespace tb::ui

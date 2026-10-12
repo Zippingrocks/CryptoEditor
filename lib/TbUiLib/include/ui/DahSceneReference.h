@@ -26,22 +26,40 @@
 #include "vm/bbox.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <optional>
+#include <string>
 #include <variant>
 #include <vector>
+
+namespace tb::gl
+{
+class ResourceManager;
+}
 
 namespace tb::ui
 {
 
+struct DahSceneReferenceBatch
+{
+  using Vertex = gl::VertexTypes::P3NT2::Vertex;
+
+  std::string materialId;
+  std::optional<std::filesystem::path> texturePreviewPath;
+  std::vector<Vertex> vertices;
+};
+
 struct DahSceneReference
 {
-  using Vertex = gl::VertexTypes::P3N::Vertex;
-
-  std::vector<Vertex> vertices;
+  std::vector<DahSceneReferenceBatch> batches;
   vm::bbox3d bounds;
   std::uint64_t lodIndex = 0;
   std::uint64_t placementCount = 0;
   std::uint64_t nativeTriangleCount = 0;
+  std::uint64_t texturedMaterialCount = 0;
+
+  std::uint64_t vertexCount() const;
 };
 
 using DahSceneReferenceResult = std::variant<DahSceneReference, DahSceneLoadError>;
@@ -50,6 +68,6 @@ DahSceneReferenceResult buildDahSceneReference(
   const DahSceneManifest& manifest, std::uint64_t lodIndex);
 
 std::unique_ptr<render::DirectRenderable> createDahSceneReferenceRenderer(
-  DahSceneReference reference);
+  DahSceneReference reference, gl::ResourceManager& resourceManager);
 
 } // namespace tb::ui

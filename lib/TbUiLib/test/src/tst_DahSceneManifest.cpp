@@ -72,12 +72,20 @@ void appendF32(QByteArray& buffer, const float value)
   appendU32(buffer, std::bit_cast<std::uint32_t>(value));
 }
 
-void appendVertex(QByteArray& buffer, const float x, const float y, const float z)
+void appendVertex(
+  QByteArray& buffer,
+  const float x,
+  const float y,
+  const float z,
+  const float u,
+  const float v)
 {
   appendF32(buffer, x);
   appendF32(buffer, y);
   appendF32(buffer, z);
-  buffer.append(QByteArray{12, '\0'});
+  appendF32(buffer, u);
+  appendF32(buffer, v);
+  buffer.append(QByteArray{4, '\0'});
 }
 
 void writeTestScene(
@@ -87,9 +95,9 @@ void writeTestScene(
   const QString& bufferPath = "buffers.bin")
 {
   auto buffer = QByteArray{};
-  appendVertex(buffer, 0.0f, 0.0f, 0.0f);
-  appendVertex(buffer, 1.0f, 0.0f, 0.0f);
-  appendVertex(buffer, 0.0f, 1.0f, 0.0f);
+  appendVertex(buffer, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+  appendVertex(buffer, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f);
+  appendVertex(buffer, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f);
   const auto triangleOffset = buffer.size();
   appendU32(buffer, 0);
   appendU32(buffer, 1);
@@ -98,6 +106,8 @@ void writeTestScene(
   {
     writeFile(root + "/buffers.bin", buffer);
   }
+  const auto preview = QByteArray{"verified preview payload"};
+  writeFile(root + "/preview.png", preview);
   const auto vertices = bufferView(buffer, 0, triangleOffset);
   const auto triangles = bufferView(buffer, triangleOffset, 12);
   const auto empty = bufferView(buffer, buffer.size(), 0);
@@ -121,8 +131,8 @@ void writeTestScene(
        {"placements", 1},
        {"lods", 1},
        {"geometries", 1},
-       {"materials", 0},
-       {"textures", 0},
+       {"materials", 1},
+       {"textures", 1},
        {"lod0_vertices", 3},
        {"lod0_triangles", 1},
        {"lod1_vertices", 0},
@@ -131,14 +141,34 @@ void writeTestScene(
      QJsonArray{QJsonObject{
        {"id", "geometry:test"},
        {"counts", QJsonObject{{"vertices", 3}, {"triangles", 1}}},
+       {"vertex_layout",
+        QJsonObject{
+          {"stride", 24},
+          {"position",
+           QJsonObject{
+             {"offset", 0},
+             {"format", "float32x3-little-endian"},
+             {"status", "verified"}}},
+          {"uv",
+           QJsonObject{
+             {"offset", 12},
+             {"format", "float32x2-little-endian"},
+             {"status", "candidate"}}}}},
        {"buffers",
         QJsonObject{
           {"vertices", vertices},
           {"index_strip", empty},
           {"triangles", triangles},
-          {"segments", empty}}}}}},
-    {"materials", QJsonArray{}},
-    {"textures", QJsonArray{}},
+          {"segments", empty}}},
+       {"segments",
+        QJsonArray{QJsonObject{{"triangle_count", 1}, {"material_slot", 0}}}}}}},
+    {"materials",
+     QJsonArray{QJsonObject{
+       {"id", "material:test"}, {"binding", QJsonObject{{"texture", "texture:test"}}}}}},
+    {"textures",
+     QJsonArray{QJsonObject{
+       {"id", "texture:test"},
+       {"preview", QJsonObject{{"file", "preview.png"}, {"sha256", hash(preview)}}}}}},
     {"placements",
      QJsonArray{QJsonObject{
        {"id", "terrain-placement:000"},
@@ -147,7 +177,7 @@ void writeTestScene(
         QJsonArray{QJsonObject{
           {"index", 0},
           {"geometry", "geometry:test"},
-          {"material_slots", QJsonArray{}}}}}}}},
+          {"material_slots", QJsonArray{"material:test"}}}}}}}},
   };
   writeFile(root + "/scene.json", QJsonDocument{manifest}.toJson());
 }
@@ -185,7 +215,11 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     const auto& reference = std::get<DahSceneReference>(referenceResult);
     CHECK(reference.placementCount == 1);
     CHECK(reference.nativeTriangleCount == 1);
-    CHECK(reference.vertices.size() == 3);
+    CHECK(reference.vertexCount() == 3);
+    CHECK(reference.batches.size() == 1);
+    CHECK(reference.texturedMaterialCount == 1);
+    CHECK(reference.batches.front().materialId == "material:test");
+    CHECK(reference.batches.front().texturePreviewPath.has_value());
     CHECK(reference.bounds.min == vm::vec3d{0.0, 0.0, 0.0});
     CHECK(reference.bounds.max == vm::vec3d{1.0, 1.0, 0.0});
   }
@@ -233,7 +267,7 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(scene.counts.lods == 184);
       CHECK(scene.counts.geometries == 184);
       CHECK(scene.geometries.size() == 184);
-      CHECK(scene.materialIds.size() == 91);
+      CHECK(scene.materials.size() == 91);
       CHECK(scene.textures.size() == 67);
       CHECK(scene.placements.size() == 92);
 
@@ -242,14 +276,18 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       const auto& reference = std::get<DahSceneReference>(referenceResult);
       CHECK(reference.placementCount == 92);
       CHECK(reference.nativeTriangleCount == 103634);
-      CHECK(reference.vertices.size() == 310902);
+      CHECK(reference.vertexCount() == 310902);
+      CHECK(reference.batches.size() == 79);
+      CHECK(reference.texturedMaterialCount == 79);
 
       const auto lod1Result = buildDahSceneReference(scene, 1);
       REQUIRE(std::holds_alternative<DahSceneReference>(lod1Result));
       const auto& lod1Reference = std::get<DahSceneReference>(lod1Result);
       CHECK(lod1Reference.placementCount == 92);
       CHECK(lod1Reference.nativeTriangleCount == 8120);
-      CHECK(lod1Reference.vertices.size() == 24360);
+      CHECK(lod1Reference.vertexCount() == 24360);
+      CHECK(lod1Reference.batches.size() == 8);
+      CHECK(lod1Reference.texturedMaterialCount == 8);
     }
   }
 }

@@ -27,6 +27,7 @@
 
 #include <cmath>
 #include <limits>
+#include <ranges>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -232,6 +233,20 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
       const auto geometryCounts = objectField(geometryJson, "counts");
       geometry.vertexCount = unsignedField(geometryCounts, "vertices");
       geometry.triangleCount = unsignedField(geometryCounts, "triangles");
+      const auto vertexLayout = objectField(geometryJson, "vertex_layout");
+      const auto positionLayout = objectField(vertexLayout, "position");
+      const auto uvLayout = objectField(vertexLayout, "uv");
+      if (
+        unsignedField(vertexLayout, "stride") != 24
+        || unsignedField(positionLayout, "offset") != 0
+        || stringField(positionLayout, "format") != "float32x3-little-endian"
+        || stringField(positionLayout, "status") != "verified"
+        || unsignedField(uvLayout, "offset") != 12
+        || stringField(uvLayout, "format") != "float32x2-little-endian"
+        || stringField(uvLayout, "status") != "candidate")
+      {
+        throw JsonError{"Unsupported DAH terrain vertex layout"};
+      }
       const auto views = objectField(geometryJson, "buffers");
       geometry.vertices = parseBufferView(
         objectField(views, "vertices"), buffer, geometry.id + " vertices");
@@ -241,6 +256,24 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
         objectField(views, "triangles"), buffer, geometry.id + " triangles");
       geometry.segments = parseBufferView(
         objectField(views, "segments"), buffer, geometry.id + " segments");
+      auto segmentTriangleCount = std::uint64_t{0};
+      for (const auto& segmentValue : arrayField(geometryJson, "segments"))
+      {
+        if (!segmentValue.isObject())
+        {
+          throw JsonError{"Scene geometry segment must be an object"};
+        }
+        const auto segmentJson = segmentValue.toObject();
+        auto segment = DahSceneGeometry::Segment{
+          unsignedField(segmentJson, "triangle_count"),
+          unsignedField(segmentJson, "material_slot")};
+        segmentTriangleCount += segment.triangleCount;
+        geometry.segmentRecords.push_back(segment);
+      }
+      if (segmentTriangleCount != geometry.triangleCount)
+      {
+        throw JsonError{geometry.id + " segment triangle counts do not match geometry"};
+      }
       result.geometries.push_back(std::move(geometry));
     }
 
@@ -251,12 +284,23 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
       {
         throw JsonError{"Scene material entry must be an object"};
       }
-      auto id = stringField(value.toObject(), "id");
-      if (!materialIds.insert(id).second)
+      const auto materialJson = value.toObject();
+      auto material = DahSceneMaterial{};
+      material.id = stringField(materialJson, "id");
+      if (!materialIds.insert(material.id).second)
       {
-        throw JsonError{"Duplicate scene material id: " + id};
+        throw JsonError{"Duplicate scene material id: " + material.id};
       }
-      result.materialIds.push_back(std::move(id));
+      const auto binding = materialJson.value("binding");
+      if (binding.isObject())
+      {
+        material.textureId = stringField(binding.toObject(), "texture");
+      }
+      else if (!binding.isNull())
+      {
+        throw JsonError{"Scene material binding must be an object or null"};
+      }
+      result.materials.push_back(std::move(material));
     }
 
     auto textureIds = std::unordered_set<std::string>{};
@@ -281,6 +325,15 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
         throw JsonError{"Scene texture preview SHA-256 mismatch: " + texture.id};
       }
       result.textures.push_back(std::move(texture));
+    }
+
+    for (const auto& material : result.materials)
+    {
+      if (material.textureId && !textureIds.contains(*material.textureId))
+      {
+        throw JsonError{
+          "Scene material references missing texture: " + *material.textureId};
+      }
     }
 
     std::uint64_t lodCount = 0;
@@ -333,6 +386,18 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
           }
           lod.materialSlots.push_back(std::move(materialId));
         }
+        const auto geometryIt = std::ranges::find_if(
+          result.geometries,
+          [&](const auto& geometry) { return geometry.id == lod.geometryId; });
+        for (const auto& segment : geometryIt->segmentRecords)
+        {
+          if (segment.materialSlot >= lod.materialSlots.size())
+          {
+            throw JsonError{
+              "Scene geometry segment references an out-of-range "
+              "material slot"};
+          }
+        }
         placement.lods.push_back(std::move(lod));
         ++lodCount;
       }
@@ -341,7 +406,7 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
 
     if (
       result.geometries.size() != result.counts.geometries
-      || result.materialIds.size() != result.counts.materials
+      || result.materials.size() != result.counts.materials
       || result.textures.size() != result.counts.textures
       || result.placements.size() != result.counts.placements
       || lodCount != result.counts.lods)

@@ -787,7 +787,8 @@ void MapWindow::updateStatusBar()
     const auto lodDescription =
       visibleLods.empty() ? tr("terrain hidden") : visibleLods.join(" + ");
     m_statusBarLabel->setText(tr("   DAH reference   |   %1 placements   |   %2   |   "
-                                 "%3 visible native triangles   |   read only")
+                                 "%3 visible native triangles   |   candidate UV/texture "
+                                 "preview   |   read only")
                                 .arg(scene->placementCount)
                                 .arg(lodDescription)
                                 .arg(visibleTriangles));

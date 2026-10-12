@@ -83,6 +83,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <variant>
 
 namespace tb::ui
@@ -452,11 +453,21 @@ bool AppController::openDocument(const std::filesystem::path& path)
                  manifest.counts.geometries,
                  {lod0Reference.nativeTriangleCount, lod1Reference.nativeTriangleCount}};
                auto lod0Renderer =
-                 std::make_shared<std::unique_ptr<render::DirectRenderable>>(
-                   createDahSceneReferenceRenderer(std::move(lod0Reference)));
+                 std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                auto lod1Renderer =
-                 std::make_shared<std::unique_ptr<render::DirectRenderable>>(
-                   createDahSceneReferenceRenderer(std::move(lod1Reference)));
+                 std::make_shared<std::unique_ptr<render::DirectRenderable>>();
+               try
+               {
+                 *lod0Renderer = createDahSceneReferenceRenderer(
+                   std::move(lod0Reference), glManager().resourceManager());
+                 *lod1Renderer = createDahSceneReferenceRenderer(
+                   std::move(lod1Reference), glManager().resourceManager());
+               }
+               catch (const std::exception& error)
+               {
+                 return Result<bool>{Error{fmt::format(
+                   "Could not create DAH terrain texture preview: {}", error.what())}};
+               }
 
                return m_mapWindowManager->createDocument(
                         *gameInfo, mdl::MapFormat::Valve, worldBounds)

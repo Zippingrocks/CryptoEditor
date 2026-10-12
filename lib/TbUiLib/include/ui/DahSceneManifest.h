@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -45,6 +46,12 @@ struct DahSceneGeometry
   DahSceneBufferView indexStrip;
   DahSceneBufferView triangles;
   DahSceneBufferView segments;
+  struct Segment
+  {
+    std::uint64_t triangleCount = 0;
+    std::uint64_t materialSlot = 0;
+  };
+  std::vector<Segment> segmentRecords;
 };
 
 struct DahSceneLod
@@ -66,6 +73,12 @@ struct DahSceneTexture
   std::string id;
   std::filesystem::path previewPath;
   std::string previewSha256;
+};
+
+struct DahSceneMaterial
+{
+  std::string id;
+  std::optional<std::string> textureId;
 };
 
 struct DahSceneCounts
@@ -91,7 +104,7 @@ struct DahSceneManifest
   std::uint64_t bufferByteLength = 0;
   DahSceneCounts counts;
   std::vector<DahSceneGeometry> geometries;
-  std::vector<std::string> materialIds;
+  std::vector<DahSceneMaterial> materials;
   std::vector<DahSceneTexture> textures;
   std::vector<DahScenePlacement> placements;
 };
