@@ -184,6 +184,8 @@ void MapDocument::setMap(std::unique_ptr<mdl::Map> map)
   m_dahSceneLod1Layer = nullptr;
   m_dahSceneLod0Renderer = nullptr;
   m_dahSceneLod1Renderer = nullptr;
+  m_dahSceneMarkerLayer = nullptr;
+  m_dahSceneMarkerRenderer = nullptr;
   m_map = std::move(map);
   m_mapRenderer = std::make_unique<render::MapRenderer>(*m_map);
   m_autosaver = std::make_unique<mdl::Autosaver>(*m_map);
@@ -228,7 +230,9 @@ void MapDocument::setDahSceneReference(
   mdl::LayerNode* lod0Layer,
   std::unique_ptr<render::DirectRenderable> lod0Renderer,
   mdl::LayerNode* lod1Layer,
-  std::unique_ptr<render::DirectRenderable> lod1Renderer)
+  std::unique_ptr<render::DirectRenderable> lod1Renderer,
+  mdl::LayerNode* markerLayer,
+  std::unique_ptr<render::DirectRenderable> markerRenderer)
 {
   contract_pre(lod0Layer != nullptr);
   contract_pre(lod0Renderer != nullptr);
@@ -239,6 +243,8 @@ void MapDocument::setDahSceneReference(
   m_dahSceneLod1Layer = lod1Layer;
   m_dahSceneLod0Renderer = std::move(lod0Renderer);
   m_dahSceneLod1Renderer = std::move(lod1Renderer);
+  m_dahSceneMarkerLayer = markerLayer;
+  m_dahSceneMarkerRenderer = std::move(markerRenderer);
   documentWasLoadedNotifier();
 }
 
@@ -251,6 +257,7 @@ mdl::LayerNode* MapDocument::dahSceneLayer(const std::uint64_t lodIndex) const
 {
   return lodIndex == 0   ? m_dahSceneLod0Layer
          : lodIndex == 1 ? m_dahSceneLod1Layer
+         : lodIndex == 2 ? m_dahSceneMarkerLayer
                          : nullptr;
 }
 
@@ -259,6 +266,7 @@ render::DirectRenderable* MapDocument::dahSceneRenderer(
 {
   return lodIndex == 0   ? m_dahSceneLod0Renderer.get()
          : lodIndex == 1 ? m_dahSceneLod1Renderer.get()
+         : lodIndex == 2 ? m_dahSceneMarkerRenderer.get()
                          : nullptr;
 }
 
@@ -278,7 +286,8 @@ std::optional<std::uint64_t> MapDocument::dahSceneLodForLayer(
 
 bool MapDocument::isDahSceneLayer(const mdl::LayerNode* layer) const
 {
-  return dahSceneLodForLayer(layer).has_value();
+  return (layer != nullptr && layer == m_dahSceneMarkerLayer)
+         || dahSceneLodForLayer(layer).has_value();
 }
 
 bool MapDocument::isDahScene() const

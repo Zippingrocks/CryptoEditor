@@ -458,7 +458,10 @@ bool AppController::openDocument(const std::filesystem::path& path)
                      placement.nativeClass,
                      placement.assetName,
                      {placement.matrix[12], placement.matrix[13], placement.matrix[14]},
-                     !placement.lods.empty()});
+                     !placement.lods.empty(),
+                     placement.previewStatus,
+                     placement.nativeLayer,
+                     placement.nativeList});
                  }
                  else if (placement.editorCollection == "props")
                  {
@@ -467,10 +470,13 @@ bool AppController::openDocument(const std::filesystem::path& path)
                      placement.nativeClass,
                      placement.assetName,
                      {placement.matrix[12], placement.matrix[13], placement.matrix[14]},
-                     !placement.lods.empty()});
+                     !placement.lods.empty(),
+                     placement.previewStatus,
+                     placement.nativeLayer,
+                     placement.nativeList});
                  }
                }
-               const auto info = DahSceneInfo{
+               auto info = DahSceneInfo{
                  *sceneDirectory,
                  manifest.profileId,
                  manifest.mapName,
@@ -484,9 +490,96 @@ bool AppController::openDocument(const std::filesystem::path& path)
                  {lod0Reference.nativeTriangleCount, lod1Reference.nativeTriangleCount},
                  std::move(buildingPlacements),
                  std::move(propPlacements)};
+               for (const auto& placement : manifest.objectPlacements)
+               {
+                 auto* collection = &info.otherWorldPlacements;
+                 if (placement.editorCollection == "humans")
+                 {
+                   collection = &info.humanPlacements;
+                 }
+                 else if (placement.editorCollection == "animals")
+                 {
+                   collection = &info.animalPlacements;
+                 }
+                 else if (placement.editorCollection == "vehicles")
+                 {
+                   collection = &info.vehiclePlacements;
+                 }
+                 else if (
+                   placement.nativeClass == "ActorTypePedestrian"
+                   && placement.assetName.starts_with("r_"))
+                 {
+                   collection = &info.robotPlacements;
+                 }
+                 else if (
+                   placement.nativeClass == "ActorTypeEmplacement"
+                   && placement.editorCollection != "buildings")
+                 {
+                   collection = &info.emplacementPlacements;
+                 }
+                 else if (placement.nativeClass == "PowerupType")
+                 {
+                   collection = &info.pickupPlacements;
+                 }
+                 else if (placement.editorCollection == "population")
+                 {
+                   collection = &info.populationPlacements;
+                 }
+                 else if (
+                   placement.editorCollection == "buildings"
+                   || placement.editorCollection == "props")
+                 {
+                   continue; // Already listed, with the same native provenance, above.
+                 }
+                 collection->push_back(DahObjectPlacementInfo{
+                   placement.id,
+                   placement.nativeClass,
+                   placement.assetName,
+                   {placement.matrix[12], placement.matrix[13], placement.matrix[14]},
+                   !placement.lods.empty(),
+                   placement.previewStatus,
+                   placement.nativeLayer,
+                   placement.nativeList});
+               }
+               for (const auto& placement : manifest.scatterPlacements)
+               {
+                 info.scatterPlacements.push_back(DahObjectPlacementInfo{
+                   placement.id,
+                   placement.nativeClass,
+                   placement.assetName,
+                   {placement.matrix[12], placement.matrix[13], placement.matrix[14]},
+                   !placement.lods.empty(),
+                   placement.previewStatus,
+                   placement.nativeLayer,
+                   placement.nativeList});
+               }
+               for (const auto& placement : manifest.landingPlacements)
+               {
+                 info.landingPlacements.push_back(DahObjectPlacementInfo{
+                   placement.id,
+                   placement.nativeClass,
+                   placement.assetName,
+                   {placement.matrix[12], placement.matrix[13], placement.matrix[14]},
+                   !placement.lods.empty(),
+                   placement.previewStatus,
+                   placement.nativeLayer,
+                   placement.nativeList});
+               }
+               for (const auto& marker : manifest.markers)
+               {
+                 info.markers.push_back(DahObjectPlacementInfo{
+                   marker.id,
+                   marker.kind,
+                   marker.label,
+                   marker.position,
+                   false,
+                   marker.status});
+               }
                auto lod0Renderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                auto lod1Renderer =
+                 std::make_shared<std::unique_ptr<render::DirectRenderable>>();
+               auto markerRenderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                try
                {
@@ -494,6 +587,8 @@ bool AppController::openDocument(const std::filesystem::path& path)
                    std::move(lod0Reference), glManager().resourceManager());
                  *lod1Renderer = createDahSceneReferenceRenderer(
                    std::move(lod1Reference), glManager().resourceManager());
+                 *markerRenderer = createDahSceneReferenceRenderer(
+                   buildDahSceneMarkerReference(manifest), glManager().resourceManager());
                }
                catch (const std::exception& error)
                {
@@ -503,7 +598,8 @@ bool AppController::openDocument(const std::filesystem::path& path)
 
                return m_mapWindowManager->createDocument(
                         *gameInfo, mdl::MapFormat::Valve, worldBounds)
-                      | kdl::transform([&, info, lod0Renderer, lod1Renderer]() {
+                      | kdl::transform(
+                        [&, info, lod0Renderer, lod1Renderer, markerRenderer]() {
                           auto* mapWindow = m_mapWindowManager->topMapWindow();
                           contract_assert(mapWindow != nullptr);
                           auto& map = mapWindow->document().map();
@@ -514,20 +610,27 @@ bool AppController::openDocument(const std::filesystem::path& path)
 
                           auto* lod0Layer = addDahDisplayLayer(
                             map,
-                            "DAH Native Scene — Terrain LOD0 + Structures",
+                            "DAH Native Scene — LOD0 + All Placed Visuals",
                             0,
                             mdl::VisibilityState::Shown);
                           auto* lod1Layer = addDahDisplayLayer(
                             map,
-                            "DAH Native Scene — Terrain LOD1 + Structures",
+                            "DAH Native Scene — LOD1 + All Placed Visuals",
                             1,
                             mdl::VisibilityState::Hidden);
+                          auto* markerLayer = addDahDisplayLayer(
+                            map,
+                            "Landing Sites & Entity Spawns — Editor Markers",
+                            2,
+                            mdl::VisibilityState::Shown);
                           mapWindow->document().setDahSceneReference(
                             info,
                             lod0Layer,
                             std::move(*lod0Renderer),
                             lod1Layer,
-                            std::move(*lod1Renderer));
+                            std::move(*lod1Renderer),
+                            markerLayer,
+                            std::move(*markerRenderer));
                           m_welcomeWindow->close();
                           return true;
                         });

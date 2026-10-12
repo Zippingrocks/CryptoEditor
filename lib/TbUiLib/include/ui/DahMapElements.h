@@ -73,6 +73,7 @@ private:
   QTreeWidget* m_propsTree = nullptr;
   QTreeWidgetItem* m_nativeBuildingsRoot = nullptr;
   QTreeWidgetItem* m_nativePropsRoot = nullptr;
+  std::vector<QTreeWidgetItem*> m_nativeExpansionRoots;
   NotifierConnection m_notifierConnection;
 
 public:
@@ -85,6 +86,7 @@ private:
   void updateStatus();
   void updateNativeBuildings();
   void updateNativeProps();
+  void updateNativeExpansion();
   void updateFilter(const QString& text);
 };
 

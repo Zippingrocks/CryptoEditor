@@ -20,6 +20,8 @@
 #include "ui/DahSceneReference.h"
 
 #include <QFile>
+#include <QOpenGLContext>
+#include <QOpenGLFunctions>
 #include <QtEndian>
 
 #include "base/Color.h"
@@ -44,8 +46,10 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <functional>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 
 namespace tb::ui
@@ -107,8 +111,7 @@ vm::vec3f transformPosition(
       + matrix[14])};
 }
 
-vm::vec3f transformNormal(
-  const vm::vec3f& normal, const std::array<double, 16>& matrix)
+vm::vec3f transformNormal(const vm::vec3f& normal, const std::array<double, 16>& matrix)
 {
   auto transformed = vm::vec3f{
     static_cast<float>(
@@ -125,13 +128,12 @@ vm::vec4f terrainDiffuseColor(const QByteArray& buffer, const std::uint64_t offs
 {
   const auto value = readU32(buffer, offset);
   constexpr auto Scale = 1.0f / 255.0f;
-  // Native D3DCOLOR is a 0xAARRGGBB dword. Alpha is preserved in the interchange,
-  // but is not opacity here until the remaining retail blend state is decoded.
+  // Native D3DCOLOR is 0xAARRGGBB; overlay segments consume the alpha channel.
   return vm::vec4f{
     static_cast<float>((value >> 16u) & 0xffu) * Scale,
     static_cast<float>((value >> 8u) & 0xffu) * Scale,
     static_cast<float>(value & 0xffu) * Scale,
-    1.0f};
+    static_cast<float>((value >> 24u) & 0xffu) * Scale};
 }
 
 vm::vec3f faceNormal(const vm::vec3f& a, const vm::vec3f& b, const vm::vec3f& c)
@@ -150,6 +152,10 @@ vm::vec3f faceNormal(const vm::vec3f& a, const vm::vec3f& b, const vm::vec3f& c)
 
 Color fallbackColor(const std::string& materialId)
 {
+  if (materialId.starts_with("editor-marker:"))
+  {
+    return Color{RgbaF{1.0f, 1.0f, 1.0f, 1.0f}};
+  }
   auto hash = std::uint32_t{2166136261u};
   for (const auto character : materialId)
   {
@@ -184,18 +190,27 @@ struct RenderBatch
   Color fallback;
   DahSceneMaterial::AddressMode addressU;
   DahSceneMaterial::AddressMode addressV;
+  std::string alphaMode;
+  float alphaReference;
+  DahSceneRenderState state;
 
   RenderBatch(
     std::vector<DahSceneReferenceBatch::Vertex> vertices,
     std::string materialId,
     std::shared_ptr<gl::TextureResource> textureResource,
     const DahSceneMaterial::AddressMode addressU,
-    const DahSceneMaterial::AddressMode addressV)
+    const DahSceneMaterial::AddressMode addressV,
+    std::string alphaMode,
+    const float alphaReference,
+    DahSceneRenderState state)
     : vertexArray{gl::VertexArray::move(std::move(vertices))}
     , material{textureResource ? std::make_unique<gl::Material>(materialId, std::move(textureResource)) : nullptr}
     , fallback{fallbackColor(materialId)}
     , addressU{addressU}
     , addressV{addressV}
+    , alphaMode{std::move(alphaMode)}
+    , alphaReference{alphaReference}
+    , state{std::move(state)}
   {
   }
 };
@@ -229,8 +244,24 @@ public:
         std::move(batch.materialId),
         textureResource,
         batch.addressU,
-        batch.addressV);
+        batch.addressV,
+        std::move(batch.alphaMode),
+        batch.alphaReference,
+        batch.state);
     }
+    std::stable_sort(
+      m_batches.begin(), m_batches.end(), [](const auto& a, const auto& b) {
+        const auto order = [](const auto& batch) {
+          return batch.alphaMode != "blend" ? 0 : batch.state.nativeTerrain ? 1 : 2;
+        };
+        const auto key = [&](const auto& batch) {
+          return std::tuple{
+            order(batch),
+            batch.state.nativeTerrain ? 0 : 1,
+            batch.state.nativeTerrain ? batch.state.terrainLayer : 0};
+        };
+        return key(a) < key(b);
+      });
   }
 
   void prepare(gl::Gl& gl, gl::VboManager& vboManager) override
@@ -278,25 +309,58 @@ public:
     {
       const auto* texture = gl::getTexture(batch.material.get());
       const auto applyMaterial = context.showMaterials() && texture != nullptr;
+      const auto blend = context.showMaterials() && batch.alphaMode == "blend";
+      shader.set(
+        "Brightness",
+        batch.state.nativeTerrain ? 1.0f : prefs.get(Preferences::Brightness));
+      shader.set("ShadeFaces", !batch.state.nativeTerrain && context.shadeFaces());
+      // Editor fog is not DAH's environment fog and must not masquerade as it.
+      shader.set("ShowFog", false);
+      gl.depthFunc(GL_LEQUAL);
+      auto* functions = QOpenGLContext::currentContext()->functions();
+      const auto equation = batch.state.blendEquation == "reverse_subtract"
+                              ? GL_FUNC_REVERSE_SUBTRACT
+                            : batch.state.blendEquation == "subtract" ? GL_FUNC_SUBTRACT
+                                                                      : GL_FUNC_ADD;
+      functions->glBlendEquation(equation);
+      if (blend)
+      {
+        gl.enable(GL_BLEND);
+        gl.blendFunc(
+          batch.state.blendSource == "one" ? GL_ONE : GL_SRC_ALPHA,
+          batch.state.blendDestination == "one"    ? GL_ONE
+          : batch.state.blendDestination == "zero" ? GL_ZERO
+                                                   : GL_ONE_MINUS_SRC_ALPHA);
+      }
+      else
+      {
+        gl.disable(GL_BLEND);
+      }
+      gl.depthMask(
+        !context.showMaterials() || batch.state.depthWrite ? GL_TRUE : GL_FALSE);
+      // Native opaque terrain still runs GREATER alpha testing (default 64/255).
+      shader.set(
+        "EnableMasked",
+        context.showMaterials()
+          && (batch.state.nativeTerrain || batch.alphaMode != "opaque"));
+      shader.set("AlphaFuncCompare", size_t{2}); // Native GREATER comparison.
+      shader.set("AlphaFuncThreshold", batch.alphaReference);
       shader.set("ApplyMaterial", applyMaterial);
       shader.set(
-        "Color",
-        applyMaterial ? Color{RgbaF{1.0f, 1.0f, 1.0f, 1.0f}} : batch.fallback);
+        "Color", applyMaterial ? Color{RgbaF{1.0f, 1.0f, 1.0f, 1.0f}} : batch.fallback);
       if (applyMaterial)
       {
         batch.material->activate(gl, context.minFilterMode(), context.magFilterMode());
         gl.texParameteri(
           GL_TEXTURE_2D,
           GL_TEXTURE_WRAP_S,
-          batch.addressU == DahSceneMaterial::AddressMode::ClampToEdge
-            ? GL_CLAMP_TO_EDGE
-            : GL_REPEAT);
+          batch.addressU == DahSceneMaterial::AddressMode::ClampToEdge ? GL_CLAMP_TO_EDGE
+                                                                       : GL_REPEAT);
         gl.texParameteri(
           GL_TEXTURE_2D,
           GL_TEXTURE_WRAP_T,
-          batch.addressV == DahSceneMaterial::AddressMode::ClampToEdge
-            ? GL_CLAMP_TO_EDGE
-            : GL_REPEAT);
+          batch.addressV == DahSceneMaterial::AddressMode::ClampToEdge ? GL_CLAMP_TO_EDGE
+                                                                       : GL_REPEAT);
       }
       if (batch.vertexArray.setup(gl, shader.program()))
       {
@@ -308,6 +372,10 @@ public:
         batch.material->deactivate(gl);
       }
     }
+    gl.depthMask(GL_TRUE);
+    QOpenGLContext::currentContext()->functions()->glBlendEquation(GL_FUNC_ADD);
+    gl.enable(GL_BLEND);
+    gl.blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     gl.enable(GL_CULL_FACE);
   }
 };
@@ -371,12 +439,14 @@ DahSceneReferenceResult buildDahSceneReference(
       }
     };
 
-    const auto appendPlacement = [&](
-                                   const DahScenePlacement& placement,
-                                   const bool requireRequestedLod) {
+    std::function<void(const DahScenePlacement&, bool)> appendPlacement;
+    appendPlacement = [&](
+                        const DahScenePlacement& placement,
+                        const bool requireRequestedLod) {
       auto lodIt = std::ranges::find_if(
         placement.lods, [&](const auto& lod) { return lod.index == lodIndex; });
-      if (lodIt == placement.lods.end() && !requireRequestedLod && !placement.lods.empty())
+      if (
+        lodIt == placement.lods.end() && !requireRequestedLod && !placement.lods.empty())
       {
         lodIt = placement.lods.begin();
       }
@@ -388,6 +458,24 @@ DahSceneReferenceResult buildDahSceneReference(
         }
         throw std::runtime_error{
           "DAH scene placement lacks requested LOD: " + placement.id};
+      }
+      if (!lodIt->parts.empty())
+      {
+        for (const auto& part : lodIt->parts)
+        {
+          auto child = placement;
+          child.lods = {DahSceneLod{lodIt->index, part.geometryId, part.materialSlots}};
+          child.matrix.fill(0.0);
+          for (size_t row = 0; row < 4; ++row)
+            for (size_t column = 0; column < 4; ++column)
+              for (size_t k = 0; k < 4; ++k)
+                child.matrix[row * 4 + column] +=
+                  part.matrix[row * 4 + k] * placement.matrix[k * 4 + column];
+          appendPlacement(child, false);
+        }
+        // Components are not additional authored map entities.
+        result.placementCount -= lodIt->parts.size() - 1;
+        return;
       }
       const auto geometryIt = geometries.find(lodIt->geometryId);
       if (geometryIt == geometries.end())
@@ -415,13 +503,15 @@ DahSceneReferenceResult buildDahSceneReference(
       for (std::uint64_t i = 0; i < geometry.vertexCount; ++i)
       {
         const auto offset = geometry.vertices.offset + i * geometry.vertexStride;
+        const auto positionOffset = offset + geometry.positionOffset;
+        const auto uvOffset = offset + geometry.uvOffset;
         positions.push_back(transformPosition(
           vm::vec3f{
-            readF32(buffer, offset),
-            readF32(buffer, offset + 4u),
-            readF32(buffer, offset + 8u)},
+            readF32(buffer, positionOffset),
+            readF32(buffer, positionOffset + 4u),
+            readF32(buffer, positionOffset + 8u)},
           placement.matrix));
-        uvs.emplace_back(readF32(buffer, offset + 12u), readF32(buffer, offset + 16u));
+        uvs.emplace_back(readF32(buffer, uvOffset), readF32(buffer, uvOffset + 4u));
         if (geometry.kind == "static-world-object")
         {
           const auto snorm = [](const std::int16_t value) {
@@ -435,26 +525,54 @@ DahSceneReferenceResult buildDahSceneReference(
             placement.matrix));
           colors.emplace_back(1.0f, 1.0f, 1.0f, 1.0f);
         }
-        else
+        else if (geometry.kind == "human-reference-pose")
+        {
+          normals.push_back(transformNormal(
+            vm::vec3f{
+              readF32(buffer, offset + 12u),
+              readF32(buffer, offset + 16u),
+              readF32(buffer, offset + 20u)},
+            placement.matrix));
+          colors.emplace_back(1.0f, 1.0f, 1.0f, 1.0f);
+        }
+        else if (geometry.kind == "terrain")
         {
           normals.emplace_back(0.0f, 0.0f, 1.0f);
           colors.push_back(terrainDiffuseColor(buffer, offset + 20u));
         }
+        else
+        {
+          normals.emplace_back(0.0f, 0.0f, 1.0f);
+          colors.emplace_back(
+            placement.color[0], placement.color[1], placement.color[2], 1.0f);
+        }
       }
 
       auto triangleCursor = std::uint64_t{0};
+      auto segmentIndex = size_t{0};
       for (const auto& segment : geometry.segmentRecords)
       {
         const auto& materialId = lodIt->materialSlots.at(segment.materialSlot);
+        const auto materialIt = materials.find(materialId);
+        if (materialIt == materials.end())
+          throw std::runtime_error{"DAH scene material missing"};
+        auto state = DahSceneRenderState{};
+        state.alphaMode = materialIt->second->alphaMode;
+        state.alphaReference = materialIt->second->alphaReference;
+        state.depthWrite = state.alphaMode != "blend";
+        if (!lodIt->segmentStates.empty())
+          state = lodIt->segmentStates.at(segmentIndex);
+        ++segmentIndex;
+        const auto batchKey =
+          materialId + ":" + geometry.kind + ":" + std::to_string(state.terrainLayer)
+          + ":" + state.alphaMode + ":" + state.blendEquation + ":" + state.blendSource
+          + ":" + state.blendDestination + ":" + std::to_string(state.depthWrite) + ":"
+          + std::to_string(state.alphaReference) + ":" + std::to_string(state.rgbScale)
+          + ":" + std::to_string(state.nativeTerrain);
         auto [batchIt, inserted] =
-          batchIndices.try_emplace(materialId, result.batches.size());
+          batchIndices.try_emplace(batchKey, result.batches.size());
         if (inserted)
         {
-          const auto materialIt = materials.find(materialId);
-          if (materialIt == materials.end())
-          {
-            throw std::runtime_error{"DAH scene segment references missing material"};
-          }
           auto texturePreviewPath = std::optional<std::filesystem::path>{};
           if (materialIt->second->textureId)
           {
@@ -471,7 +589,10 @@ DahSceneReferenceResult buildDahSceneReference(
             texturePreviewPath,
             materialIt->second->addressU,
             materialIt->second->addressV,
-            {}});
+            {},
+            state.alphaMode,
+            state.alphaReference,
+            state});
         }
         auto& batch = result.batches[batchIt->second];
 
@@ -491,15 +612,29 @@ DahSceneReferenceResult buildDahSceneReference(
           const auto& b = positions[index1];
           const auto& c = positions[index2];
           const auto flatNormal = faceNormal(a, b, c);
-          const auto& normal0 =
-            geometry.kind == "terrain" ? flatNormal : normals[index0];
-          const auto& normal1 =
-            geometry.kind == "terrain" ? flatNormal : normals[index1];
-          const auto& normal2 =
-            geometry.kind == "terrain" ? flatNormal : normals[index2];
-          batch.vertices.emplace_back(a, normal0, uvs[index0], colors[index0]);
-          batch.vertices.emplace_back(b, normal1, uvs[index1], colors[index1]);
-          batch.vertices.emplace_back(c, normal2, uvs[index2], colors[index2]);
+          const auto& normal0 = (geometry.kind == "static-world-object"
+                                 || geometry.kind == "human-reference-pose")
+                                  ? normals[index0]
+                                  : flatNormal;
+          const auto& normal1 = (geometry.kind == "static-world-object"
+                                 || geometry.kind == "human-reference-pose")
+                                  ? normals[index1]
+                                  : flatNormal;
+          const auto& normal2 = (geometry.kind == "static-world-object"
+                                 || geometry.kind == "human-reference-pose")
+                                  ? normals[index2]
+                                  : flatNormal;
+          const auto color = [&](const size_t index) {
+            const auto& native = colors[index];
+            return vm::vec4f{
+              native.x() * state.rgbScale,
+              native.y() * state.rgbScale,
+              native.z() * state.rgbScale,
+              native.w()};
+          };
+          batch.vertices.emplace_back(a, normal0, uvs[index0], color(index0));
+          batch.vertices.emplace_back(b, normal1, uvs[index1], color(index1));
+          batch.vertices.emplace_back(c, normal2, uvs[index2], color(index2));
           addToBounds(a);
           addToBounds(b);
           addToBounds(c);
@@ -520,12 +655,15 @@ DahSceneReferenceResult buildDahSceneReference(
     }
     for (const auto& placement : manifest.objectPlacements)
     {
-      if (
-        placement.editorCollection == "buildings"
-        || placement.editorCollection == "props")
-      {
-        appendPlacement(placement, false);
-      }
+      appendPlacement(placement, false);
+    }
+    for (const auto& placement : manifest.scatterPlacements)
+    {
+      appendPlacement(placement, false);
+    }
+    for (const auto& placement : manifest.landingPlacements)
+    {
+      appendPlacement(placement, false);
     }
 
     if (!haveBounds)
@@ -545,6 +683,47 @@ std::unique_ptr<render::DirectRenderable> createDahSceneReferenceRenderer(
   DahSceneReference reference, gl::ResourceManager& resourceManager)
 {
   return std::make_unique<DahReferenceRenderer>(std::move(reference), resourceManager);
+}
+
+DahSceneReference buildDahSceneMarkerReference(const DahSceneManifest& manifest)
+{
+  auto result = DahSceneReference{};
+  auto batch = DahSceneReferenceBatch{};
+  batch.materialId = "editor-marker:spawn-and-landing";
+  for (const auto& marker : manifest.markers)
+  {
+    const auto landing = marker.kind == "landing-site";
+    const auto radius = landing ? 2.5f : 0.6f;
+    const auto center = vm::vec3f{
+      static_cast<float>(marker.position[0]),
+      static_cast<float>(marker.position[1]),
+      static_cast<float>(marker.position[2]) + radius};
+    const auto color =
+      landing ? vm::vec4f{0.2f, 1.0f, 0.9f, 1.0f} : vm::vec4f{1.0f, 0.55f, 0.15f, 1.0f};
+    const std::array<vm::vec3f, 6> points = {
+      center + vm::vec3f{radius, 0, 0},
+      center + vm::vec3f{0, radius, 0},
+      center + vm::vec3f{-radius, 0, 0},
+      center + vm::vec3f{0, -radius, 0},
+      center + vm::vec3f{0, 0, radius},
+      center + vm::vec3f{0, 0, -radius}};
+    for (size_t i = 0; i < 4; ++i)
+    {
+      for (const auto tip : {size_t{4}, size_t{5}})
+      {
+        const auto normal = faceNormal(points[i], points[(i + 1) % 4], points[tip]);
+        for (const auto vertex : {i, (i + 1) % 4, tip})
+        {
+          batch.vertices.emplace_back(points[vertex], normal, vm::vec2f{}, color);
+        }
+      }
+    }
+  }
+  if (!batch.vertices.empty())
+  {
+    result.batches.push_back(std::move(batch));
+  }
+  return result;
 }
 
 } // namespace tb::ui

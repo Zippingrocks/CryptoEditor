@@ -50,6 +50,9 @@ struct DahSceneReferenceBatch
   DahSceneMaterial::AddressMode addressU = DahSceneMaterial::AddressMode::Repeat;
   DahSceneMaterial::AddressMode addressV = DahSceneMaterial::AddressMode::Repeat;
   std::vector<Vertex> vertices;
+  std::string alphaMode = "opaque";
+  float alphaReference = 0.0f;
+  DahSceneRenderState state;
 };
 
 struct DahSceneReference
@@ -68,6 +71,9 @@ using DahSceneReferenceResult = std::variant<DahSceneReference, DahSceneLoadErro
 
 DahSceneReferenceResult buildDahSceneReference(
   const DahSceneManifest& manifest, std::uint64_t lodIndex);
+
+// Editor annotations only; these triangles are never native game geometry.
+DahSceneReference buildDahSceneMarkerReference(const DahSceneManifest& manifest);
 
 std::unique_ptr<render::DirectRenderable> createDahSceneReferenceRenderer(
   DahSceneReference reference, gl::ResourceManager& resourceManager);

@@ -98,6 +98,9 @@ struct DahObjectPlacementInfo
   std::string assetName;
   std::array<double, 3> position{};
   bool renderable = false;
+  std::string status;
+  std::string nativeLayer;
+  std::string nativeList;
 };
 
 struct DahSceneInfo
@@ -115,6 +118,17 @@ struct DahSceneInfo
   std::array<std::uint64_t, 2> nativeTriangleCounts{};
   std::vector<DahObjectPlacementInfo> buildingPlacements;
   std::vector<DahObjectPlacementInfo> propPlacements;
+  std::vector<DahObjectPlacementInfo> humanPlacements;
+  std::vector<DahObjectPlacementInfo> scatterPlacements;
+  std::vector<DahObjectPlacementInfo> markers;
+  std::vector<DahObjectPlacementInfo> vehiclePlacements;
+  std::vector<DahObjectPlacementInfo> animalPlacements;
+  std::vector<DahObjectPlacementInfo> robotPlacements;
+  std::vector<DahObjectPlacementInfo> emplacementPlacements;
+  std::vector<DahObjectPlacementInfo> pickupPlacements;
+  std::vector<DahObjectPlacementInfo> populationPlacements;
+  std::vector<DahObjectPlacementInfo> otherWorldPlacements;
+  std::vector<DahObjectPlacementInfo> landingPlacements;
 };
 
 class MapDocument
@@ -197,6 +211,8 @@ private:
   mdl::LayerNode* m_dahSceneLod1Layer = nullptr;
   std::unique_ptr<render::DirectRenderable> m_dahSceneLod0Renderer;
   std::unique_ptr<render::DirectRenderable> m_dahSceneLod1Renderer;
+  mdl::LayerNode* m_dahSceneMarkerLayer = nullptr;
+  std::unique_ptr<render::DirectRenderable> m_dahSceneMarkerRenderer;
 
   NotifierConnection m_notifierConnection;
 
@@ -260,7 +276,9 @@ public: // accessors and such
     mdl::LayerNode* lod0Layer,
     std::unique_ptr<render::DirectRenderable> lod0Renderer,
     mdl::LayerNode* lod1Layer,
-    std::unique_ptr<render::DirectRenderable> lod1Renderer);
+    std::unique_ptr<render::DirectRenderable> lod1Renderer,
+    mdl::LayerNode* markerLayer = nullptr,
+    std::unique_ptr<render::DirectRenderable> markerRenderer = nullptr);
   const DahSceneInfo* dahSceneInfo() const;
   mdl::LayerNode* dahSceneLayer(std::uint64_t lodIndex) const;
   render::DirectRenderable* dahSceneRenderer(std::uint64_t lodIndex) const;

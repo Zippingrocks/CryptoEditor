@@ -131,6 +131,7 @@ void LayerListBoxWidget::updateLayerItem()
                 .arg(m_layer->childCount())
                 .arg(m_layer->childCount() == 1 ? "object" : "objects");
   const auto dahLod = m_document.dahSceneLodForLayer(m_layer);
+  const auto dahLayer = m_document.isDahSceneLayer(m_layer);
   if (dahLod)
   {
     const auto* scene = m_document.dahSceneInfo();
@@ -138,16 +139,21 @@ void LayerListBoxWidget::updateLayerItem()
              .arg(scene->placementCount)
              .arg(scene->nativeTriangleCounts[*dahLod]);
   }
+  else if (dahLayer)
+  {
+    info = tr("%1 editor markers at native positions")
+             .arg(m_document.dahSceneInfo()->markers.size());
+  }
   m_infoText->setText(info);
 
   // Update buttons
   m_activeButton->setChecked(editorContext.currentLayer() == m_layer);
-  m_activeButton->setEnabled(!dahLod);
+  m_activeButton->setEnabled(!dahLayer);
   m_lockButton->setChecked(m_layer->locked());
-  m_lockButton->setEnabled(!dahLod);
+  m_lockButton->setEnabled(!dahLayer);
   m_hiddenButton->setChecked(m_layer->hidden());
   m_omitFromExportButton->setChecked(m_layer->layer().omitFromExport());
-  m_omitFromExportButton->setEnabled(!dahLod);
+  m_omitFromExportButton->setEnabled(!dahLayer);
 }
 
 mdl::LayerNode* LayerListBoxWidget::layer() const

@@ -41,16 +41,48 @@ resource identities, relocations, loadgroups, native meshes and both LODs,
 materials, textures, unknown fields, validation, and—only after round-trip
 gates pass—package writing.
 
-The first boundary is the versioned, read-only `.dahscene` v2 directory emitted
+The boundary is the versioned, read-only `.dahscene` v4 directory emitted
 by `dahdev`. CryptoEditor has a strict manifest loader that verifies the
 schema, read-only marker, package and buffer-view hashes, path containment,
 geometry references, collection counts, and Area 42's exact native geometry
-counts before accepting a scene. In addition to both native terrain LODs, v2
-preserves all 41 world-instance buckets and 849 placement records. It currently
-resolves the placement/archetype/LOD/static-mesh chain for 17 of Area 42's 18
-building placements; the guard tower's segmented visual remains represented but
-is explicitly unresolved. The editor displays those buildings at their retail
-transforms rather than presenting them as an unplaced model catalog.
+counts before accepting a scene. Existing v2 and v3 directories remain readable,
+but their smaller inventories are not the complete v4 reconstruction.
+
+Area 42 v4 reads both native instance lists in all 41 world-instance buckets:
+2,674 authored records, not the earlier single-list inventory of 849. It resolves
+79 building and 1,468 prop placements, including intact multipart visuals. A
+component retains its native mesh, materials, skeleton/bone association and local
+matrix; the renderer composes that matrix with the authored world placement.
+Components are not counted as additional authored entities.
+
+The current read-only fixture contains:
+
+| Content | Native/reference coverage |
+| --- | --- |
+| Terrain | 92 placements; both LODs; 184 geometries |
+| World instance database | 2,674 records; 2,535 with reference visuals |
+| Buildings and props | 79 buildings and 1,468 props, all with reference visuals |
+| Human actors | 295 placements; three mesh LODs, native clothing variants and skeleton data |
+| Static scatter | 15,121 foliage/rock instances in 654 batches using five templates |
+| Landing sites | Three registrations plus the native 11-part marker visual at each authored center |
+| Shared scene assets | 592 geometries, 695 materials and 331 decoded texture previews |
+
+Vehicles, animals, gameplay-owned objects and other native actor classes remain
+distinct from humans and buildings. The inspector retains original class/asset
+names, list membership and mission-layer provenance. These are editor categories,
+not a claim that every authored actor is active simultaneously. Reference-pose
+skinned actors retain skeletons, weights and batch palettes; runtime animation
+and held attachments remain unapplied.
+
+Three landing regions are resolved through retail Lua registration calls and
+native region hash lookups. A separate locked display layer shows 142 editor
+annotations: those three landing regions and 139 random population positions.
+Resolved entity visuals are not replaced by generic annotations. The native
+landing visual and its editor annotation remain separate records; native
+collision-based height projection and pulsing/rise/fall animation are not
+reproduced. The interchange preserves three cumulative-probability
+population definitions, four directed-spawn recipe tables, all regions/tags and
+mission-layer links. Markers do not imply simultaneous runtime activation.
 
 CryptoEditor frames the combined terrain and building reference in the 3D
 viewport and exposes locked LOD0 and LOD1 display layers alongside an ordinary
@@ -60,10 +92,31 @@ and LOD1 is initially hidden. The renderer consumes the executable-verified UV
 channel, exact segment-to-material assignments, hash-verified decoded PNG
 previews, and verified per-axis wrap/clamp modes for every material used by Area
 42's two terrain LODs. The pinned retail executable also proves the terrain
-stream's final four bytes are `D3DCOLOR`; the viewport applies native RGB vertex
-modulation while leaving alpha/blending disabled until its render-state meaning
-is established. Viewport orientation, remaining render states, and the high
-segment-flag byte still require matching in-game confirmation.
+stream's final four bytes are `D3DCOLOR`. The terrain path retains all RGBA
+channels and the basic retail pixel shader's RGB-times-two modulation. The high
+segment-flag byte supplies native layer-dependent draw state: base surfaces and
+alpha-blended overlays are separate batches, with native `LESS_EQUAL` depth
+testing and overlay depth writes disabled. Five native terrain materials use
+ONE/ONE reverse-subtractive blending for 1,071 triangles across both LODs.
+Cutout thresholds, ordinary source-alpha blending and per-axis addressing are
+derived from executable evidence rather than guessed from texture appearance.
+
+Native authoring UV matrices are preserved, but terrain initialization resets
+them to identity before drawing; the viewer does not apply those matrices twice
+to the compiled UVs. It also does not blindly multiply basic terrain pixels by
+material opacity or diffuse-color fields that the verified shader does not use.
+Texture decoding covers native BC1/BC3, swizzled A8R8G8B8, and the verified
+single-level linear A8R8G8B8/A4R4G4B4 layouts. Scatter preserves per-instance RGB
+and original matrices.
+
+This is not a game-exact viewport. Native face-culling parity remains unverified
+and the preview currently disables culling. Retail environment fog and lighting,
+animated materials, human/vehicle animation, scatter wind/distance fade,
+individual transparent-instance ordering and exceptional render paths remain
+incomplete. Generic editor face shading and fog are not substitutes for the
+native terrain shading path. Collision, destruction-state behavior, streaming
+and gameplay activation are not simulated. Matching retail captures are still
+required to assess the remaining visual differences.
 Native save, autosave, revert, and misleading map/OBJ exports are disabled for
 this document type. A converted heightmap or Battlefront `.wld`/`.ter` file must
 never become the authoritative representation of a DAH map.
@@ -88,14 +141,19 @@ disabled until the unchanged-save gate supplies a verified writer. See
    document-open path and render all 92 native terrain placements at both LODs.
 3. **Complete for the read-only preview:** add executable-verified UVs, exact
    material batches, hash-verified decoded textures, native U/V wrap/clamp, and
-   native terrain RGB vertex modulation.
-4. **Complete for Area 42 buildings:** preserve all native world placements and
-   render 17 verified building placements through their native resource chain.
+   native terrain RGBA/layer blending, basic RGB-times-two shading, cutout
+   thresholds and verified shadow blend equations.
+4. **Complete for the schema v4 read-only inventory:** preserve both native world
+   lists, all 2,674 placement records and layer/list provenance; resolve 79
+   buildings, 1,468 props, multipart reference visuals, 15,121 scatter instances,
+   295 human reference meshes and three native landing visuals. Preserve
+   unresolved runtime behavior explicitly rather than inventing it.
 5. **Next:** compare representative terrain against matching in-game locations,
    resolve remaining visual differences, then add terrain selection and
    inspection without changing package data.
-6. Resolve segmented/destructible visuals and the other native object mesh
-   families, then connect scene selection to preserved object records.
+6. Verify native lighting/fog/culling, actor and landing animation, collision
+   projection, destruction states and scatter dynamics, then connect scene
+   selection to preserved object records.
 7. Add brush-to-native geometry workflows alongside native terrain editing.
 8. Prove byte-preserving unchanged serialization.
 9. Prove one controlled object move on a disposable game copy.
@@ -109,7 +167,9 @@ locked display layers, while future authored brushes and objects remain in
 ordinary editable layers. Nested groups provide the folder-like hierarchy for
 authored objects. A separate Photoshop-style nested-layer implementation is not
 needed until DAH-specific workflows demonstrate a limitation in this combined
-layer-and-group model.
+layer-and-group model. Native mission-layer membership and instance-list
+provenance are shown independently of these editor display layers. Showing a
+record in the inspector does not activate its mission layer or spawn recipe.
 
 DAH1 US Xbox retail Area 42 is the reference target. DAH2 retail and prototype
 builds receive separate adapters until evidence proves which structures are

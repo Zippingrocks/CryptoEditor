@@ -248,6 +248,81 @@ bool matchesFilter(const QTreeWidgetItem& item, const QString& filter)
          || item.text(1).contains(filter, Qt::CaseInsensitive);
 }
 
+constexpr auto AuthoringTaxonomyRole = Qt::UserRole + 1;
+
+QString placementDetail(const DahObjectPlacementInfo& placement)
+{
+  const auto status = placement.status.empty()
+                        ? (placement.renderable ? QStringLiteral("native mesh")
+                                                : QStringLiteral("placement preserved"))
+                        : QString::fromStdString(placement.status);
+  auto result = QStringLiteral("x %1, y %2, z %3 — %4")
+                  .arg(placement.position[0], 0, 'f', 2)
+                  .arg(placement.position[1], 0, 'f', 2)
+                  .arg(placement.position[2], 0, 'f', 2)
+                  .arg(status);
+  if (!placement.nativeLayer.empty())
+  {
+    result +=
+      QStringLiteral(" — layer: ") + QString::fromStdString(placement.nativeLayer);
+  }
+  if (!placement.nativeList.empty())
+  {
+    result += QStringLiteral(" — list: ") + QString::fromStdString(placement.nativeList);
+  }
+  return result;
+}
+
+void appendNativePlacements(
+  QTreeWidgetItem& root, const std::vector<DahObjectPlacementInfo>& placements)
+{
+  using PlacementList = std::vector<const DahObjectPlacementInfo*>;
+  auto classes = std::map<std::string, std::map<std::string, PlacementList>>{};
+  for (const auto& placement : placements)
+  {
+    const auto nativeClass =
+      placement.nativeClass.empty() ? "Unresolved native class" : placement.nativeClass;
+    const auto asset =
+      placement.assetName.empty() ? "Unnamed native asset" : placement.assetName;
+    classes[nativeClass][asset].push_back(&placement);
+  }
+  for (const auto& [nativeClass, assets] : classes)
+  {
+    auto* classRoot = new QTreeWidgetItem{
+      &root, {QString::fromStdString(nativeClass), QStringLiteral("Native class")}};
+    for (const auto& [asset, records] : assets)
+    {
+      auto* assetRoot = new QTreeWidgetItem{
+        classRoot,
+        {QString::fromStdString(asset),
+         QStringLiteral("%1 placements").arg(records.size())}};
+      for (const auto* placement : records)
+      {
+        auto* item = new QTreeWidgetItem{
+          assetRoot,
+          {QString::fromStdString(placement->id), placementDetail(*placement)}};
+        item->setToolTip(0, QString::fromStdString(placement->id));
+        item->setToolTip(1, placementDetail(*placement));
+      }
+    }
+    classRoot->setExpanded(true);
+  }
+  root.setExpanded(true);
+}
+
+bool filterTreeItem(
+  QTreeWidgetItem& item, const QString& filter, const bool parentMatches)
+{
+  const auto matches = parentMatches || filter.isEmpty() || matchesFilter(item, filter);
+  auto visible = matches;
+  for (auto index = 0; index < item.childCount(); ++index)
+  {
+    visible = filterTreeItem(*item.child(index), filter, matches) || visible;
+  }
+  item.setHidden(!visible);
+  return visible;
+}
+
 } // namespace
 
 const std::vector<DahMapElementGroup>& dahMapElementGroups()
@@ -287,9 +362,9 @@ DahMapElements::DahMapElements(MapDocument& document, QWidget* parent)
 void DahMapElements::createGui()
 {
   auto* introduction = new QLabel{
-    tr("DAH map elements are separated by ownership. Buildings contain structure "
-       "assets; collision, destruction, mission logic, and streaming remain linked "
-       "systems so native data is not flattened into one object list.")};
+    tr("Loaded DAH records are organized by native class and asset. Layer and list "
+       "provenance remain visible; mission records are not merged into a single "
+       "gameplay state. This inspector does not place catalog examples into the map.")};
   introduction->setWordWrap(true);
 
   m_status = new QLabel{};
@@ -328,7 +403,8 @@ QWidget* DahMapElements::createTab(const DahMapElementTab tab)
   auto* tree = new QTreeWidget{};
   tree->setObjectName("DahMapElements_" + text(dahMapElementTabTitle(tab)) + "Tree");
   tree->setColumnCount(2);
-  tree->setHeaderLabels({tr("Category / element"), tr("Responsibility")});
+  tree->setHeaderLabels(
+    {tr("Native class / asset / placement"), tr("Status / provenance")});
   tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
   tree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
   tree->setRootIsDecorated(true);
@@ -342,6 +418,11 @@ QWidget* DahMapElements::createTab(const DahMapElementTab tab)
     m_propsTree = tree;
   }
 
+  auto* authoringRoot = new QTreeWidgetItem{
+    tree,
+    {tr("Authoring categories (not loaded objects)"),
+     tr("Planning taxonomy; no native placements are implied")}};
+  authoringRoot->setData(0, AuthoringTaxonomyRole, true);
   auto collections = std::map<std::string_view, QTreeWidgetItem*>{};
   for (const auto& group : Groups)
   {
@@ -352,7 +433,7 @@ QWidget* DahMapElements::createTab(const DahMapElementTab tab)
     auto [it, inserted] = collections.try_emplace(group.collection, nullptr);
     if (inserted)
     {
-      it->second = new QTreeWidgetItem{tree, {text(group.collection)}};
+      it->second = new QTreeWidgetItem{authoringRoot, {text(group.collection)}};
       auto font = it->second->font(0);
       font.setBold(true);
       it->second->setFont(0, font);
@@ -392,23 +473,28 @@ void DahMapElements::updateStatus()
   if (const auto* scene = m_document.dahSceneInfo())
   {
     m_status->setText(
-      tr("%1: %2 native world placements, including %3 building and %4 PropType "
-         "set-piece placements. All %5 structures use their retail archetype, "
-         "transform, mesh, material slots, and textures.")
+      tr("%1: %2 world records, including %3 buildings, %4 props and %5 humans; "
+         "%6 scatter instances, %7 native landing visuals and %8 editor markers. "
+         "Actors use authored reference poses. Native mission layers remain distinct; "
+         "this is not a simulated mission state.")
         .arg(QString::fromStdString(scene->mapName))
         .arg(scene->worldPlacementCount)
         .arg(scene->buildingPlacementCount)
         .arg(scene->propPlacementCount)
-        .arg(scene->buildingPlacementCount + scene->propPlacementCount));
+        .arg(scene->humanPlacements.size())
+        .arg(scene->scatterPlacements.size())
+        .arg(scene->landingPlacements.size())
+        .arg(scene->markers.size()));
   }
   else
   {
     m_status->setText(
-      tr("Catalog taxonomy is ready. Open a .dahscene to associate verified native "
-         "resources; placement is disabled until the relevant adapter is implemented."));
+      tr("No native scene loaded. The authoring categories below are planning labels, "
+         "not loaded assets. Open a .dahscene to inspect actual native placements."));
   }
   updateNativeBuildings();
   updateNativeProps();
+  updateNativeExpansion();
 }
 
 void DahMapElements::updateNativeBuildings()
@@ -437,28 +523,7 @@ void DahMapElements::updateNativeBuildings()
   font.setBold(true);
   m_nativeBuildingsRoot->setFont(0, font);
 
-  auto archetypes = std::map<std::string, QTreeWidgetItem*>{};
-  for (const auto& placement : scene->buildingPlacements)
-  {
-    const auto label =
-      placement.assetName.empty() ? placement.id : placement.assetName;
-    auto [it, inserted] = archetypes.try_emplace(label, nullptr);
-    if (inserted)
-    {
-      it->second = new QTreeWidgetItem{
-        m_nativeBuildingsRoot,
-        {QString::fromStdString(label), QString::fromStdString(placement.nativeClass)}};
-    }
-    const auto position = tr("x %1, y %2, z %3 — %4")
-                            .arg(placement.position[0], 0, 'f', 2)
-                            .arg(placement.position[1], 0, 'f', 2)
-                            .arg(placement.position[2], 0, 'f', 2)
-                            .arg(
-                              placement.renderable ? tr("native mesh")
-                                                   : tr("placement preserved"));
-    new QTreeWidgetItem{it->second, {QString::fromStdString(placement.id), position}};
-  }
-  m_nativeBuildingsRoot->setExpanded(true);
+  appendNativePlacements(*m_nativeBuildingsRoot, scene->buildingPlacements);
 }
 
 void DahMapElements::updateNativeProps()
@@ -487,28 +552,54 @@ void DahMapElements::updateNativeProps()
   font.setBold(true);
   m_nativePropsRoot->setFont(0, font);
 
-  auto archetypes = std::map<std::string, QTreeWidgetItem*>{};
-  for (const auto& placement : scene->propPlacements)
+  appendNativePlacements(*m_nativePropsRoot, scene->propPlacements);
+}
+
+void DahMapElements::updateNativeExpansion()
+{
+  for (auto* root : m_nativeExpansionRoots)
   {
-    const auto label =
-      placement.assetName.empty() ? placement.id : placement.assetName;
-    auto [it, inserted] = archetypes.try_emplace(label, nullptr);
-    if (inserted)
-    {
-      it->second = new QTreeWidgetItem{
-        m_nativePropsRoot,
-        {QString::fromStdString(label), QString::fromStdString(placement.nativeClass)}};
-    }
-    const auto position = tr("x %1, y %2, z %3 — %4")
-                            .arg(placement.position[0], 0, 'f', 2)
-                            .arg(placement.position[1], 0, 'f', 2)
-                            .arg(placement.position[2], 0, 'f', 2)
-                            .arg(
-                              placement.renderable ? tr("native mesh")
-                                                   : tr("placement preserved"));
-    new QTreeWidgetItem{it->second, {QString::fromStdString(placement.id), position}};
+    delete root;
   }
-  m_nativePropsRoot->setExpanded(true);
+  m_nativeExpansionRoots.clear();
+  const auto* scene = m_document.dahSceneInfo();
+  if (scene == nullptr)
+  {
+    updateFilter(m_filter->text());
+    return;
+  }
+  const auto populate = [&](
+                          const size_t tab,
+                          const QString& title,
+                          const std::vector<DahObjectPlacementInfo>& placements,
+                          const bool annotations = false) {
+    if (placements.empty())
+    {
+      return;
+    }
+    auto* root = new QTreeWidgetItem{
+      m_trees.at(tab),
+      {title,
+       (annotations ? tr("%1 editor annotations") : tr("%1 native records"))
+         .arg(placements.size())}};
+    m_nativeExpansionRoots.push_back(root);
+    appendNativePlacements(*root, placements);
+  };
+  populate(1, tr("Native Foliage & Static Scatter"), scene->scatterPlacements);
+  populate(3, tr("Native Human Placements"), scene->humanPlacements);
+  populate(3, tr("Native Animal Placements"), scene->animalPlacements);
+  populate(3, tr("Native Vehicle Placements"), scene->vehiclePlacements);
+  populate(3, tr("Native Robots & Powersuits"), scene->robotPlacements);
+  populate(4, tr("Native Emplacements & Defenses"), scene->emplacementPlacements);
+  populate(4, tr("Native Pickups & Collectibles"), scene->pickupPlacements);
+  populate(
+    4,
+    tr("Native Population Definitions (not placed humans)"),
+    scene->populationPlacements);
+  populate(4, tr("Other Native World Records"), scene->otherWorldPlacements);
+  populate(4, tr("Native Landing Site Visuals"), scene->landingPlacements);
+  populate(4, tr("Landing & Spawn Annotations (editor markers)"), scene->markers, true);
+  updateFilter(m_filter->text());
 }
 
 void DahMapElements::updateFilter(const QString& text)
@@ -520,23 +611,14 @@ void DahMapElements::updateFilter(const QString& text)
          ++collectionIndex)
     {
       auto* collection = tree->topLevelItem(collectionIndex);
-      auto collectionVisible = filter.isEmpty() || matchesFilter(*collection, filter);
-      for (auto categoryIndex = 0; categoryIndex < collection->childCount();
-           ++categoryIndex)
+      if (
+        collection->data(0, AuthoringTaxonomyRole).toBool()
+        && m_document.dahSceneInfo() != nullptr)
       {
-        auto* category = collection->child(categoryIndex);
-        auto categoryVisible = filter.isEmpty() || matchesFilter(*category, filter);
-        for (auto itemIndex = 0; itemIndex < category->childCount(); ++itemIndex)
-        {
-          auto* item = category->child(itemIndex);
-          const auto itemVisible = filter.isEmpty() || matchesFilter(*item, filter);
-          item->setHidden(!itemVisible && !categoryVisible && !collectionVisible);
-          categoryVisible = categoryVisible || itemVisible;
-        }
-        category->setHidden(!categoryVisible && !collectionVisible);
-        collectionVisible = collectionVisible || categoryVisible;
+        collection->setHidden(true);
+        continue;
       }
-      collection->setHidden(!collectionVisible);
+      filterTreeItem(*collection, filter, false);
     }
   }
 }

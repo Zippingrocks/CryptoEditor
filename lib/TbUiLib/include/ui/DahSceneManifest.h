@@ -42,6 +42,8 @@ struct DahSceneGeometry
   std::string id;
   std::string kind;
   std::uint64_t vertexStride = 0;
+  std::uint64_t positionOffset = 0;
+  std::uint64_t uvOffset = 12;
   std::uint64_t vertexCount = 0;
   std::uint64_t triangleCount = 0;
   DahSceneBufferView vertices;
@@ -56,11 +58,33 @@ struct DahSceneGeometry
   std::vector<Segment> segmentRecords;
 };
 
+struct DahSceneRenderState
+{
+  std::string alphaMode = "opaque";
+  float alphaReference = 0.0f;
+  std::string blendSource = "src_alpha";
+  std::string blendDestination = "one_minus_src_alpha";
+  std::string blendEquation = "add";
+  bool depthWrite = true;
+  bool nativeTerrain = false;
+  float rgbScale = 1.0f;
+  int terrainLayer = 0;
+};
+
+struct DahScenePart
+{
+  std::string geometryId;
+  std::vector<std::string> materialSlots;
+  std::array<double, 16> matrix{};
+};
+
 struct DahSceneLod
 {
   std::uint64_t index = 0;
   std::string geometryId;
   std::vector<std::string> materialSlots;
+  std::vector<DahScenePart> parts;
+  std::vector<DahSceneRenderState> segmentStates;
 };
 
 struct DahScenePlacement
@@ -70,7 +94,20 @@ struct DahScenePlacement
   std::string nativeClass;
   std::string assetName;
   std::array<double, 16> matrix{};
+  std::array<float, 3> color{1.0f, 1.0f, 1.0f};
+  std::string previewStatus;
   std::vector<DahSceneLod> lods;
+  std::string nativeLayer;
+  std::string nativeList;
+};
+
+struct DahSceneMarker
+{
+  std::string id;
+  std::string kind;
+  std::string label;
+  std::string status;
+  std::array<double, 3> position{};
 };
 
 struct DahSceneTexture
@@ -92,6 +129,8 @@ struct DahSceneMaterial
   std::optional<std::string> textureId;
   AddressMode addressU = AddressMode::Repeat;
   AddressMode addressV = AddressMode::Repeat;
+  std::string alphaMode = "opaque";
+  float alphaReference = 0.0f;
 };
 
 struct DahSceneCounts
@@ -115,6 +154,15 @@ struct DahSceneCounts
   std::uint64_t lod0Triangles = 0;
   std::uint64_t lod1Vertices = 0;
   std::uint64_t lod1Triangles = 0;
+  std::uint64_t scatterBatches = 0;
+  std::uint64_t scatterPlacements = 0;
+  std::uint64_t scatterGeometries = 0;
+  std::uint64_t humanPlacements = 0;
+  std::uint64_t humanRenderablePlacements = 0;
+  std::uint64_t humanGeometries = 0;
+  std::uint64_t sceneMarkers = 0;
+  std::uint64_t landingSites = 0;
+  std::uint64_t spawnDefinitions = 0;
 };
 
 struct DahSceneManifest
@@ -125,12 +173,16 @@ struct DahSceneManifest
   std::string mapName;
   std::string bufferSha256;
   std::uint64_t bufferByteLength = 0;
+  std::uint64_t schemaVersion = 2;
   DahSceneCounts counts;
   std::vector<DahSceneGeometry> geometries;
   std::vector<DahSceneMaterial> materials;
   std::vector<DahSceneTexture> textures;
   std::vector<DahScenePlacement> placements;
   std::vector<DahScenePlacement> objectPlacements;
+  std::vector<DahScenePlacement> scatterPlacements;
+  std::vector<DahScenePlacement> landingPlacements;
+  std::vector<DahSceneMarker> markers;
 };
 
 struct DahSceneLoadError

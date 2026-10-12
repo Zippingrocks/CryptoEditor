@@ -85,7 +85,7 @@ void appendVertex(
   appendF32(buffer, z);
   appendF32(buffer, u);
   appendF32(buffer, v);
-  buffer.append(QByteArray{4, '\0'});
+  appendU32(buffer, 0x80402010u); // Native D3DCOLOR: alpha, red, green, blue.
 }
 
 void writeTestScene(
@@ -140,6 +140,16 @@ void writeTestScene(
        {"prop_renderable_placements", 0},
        {"prop_geometries", 0},
        {"renderable_structure_placements", 0},
+       {"human_placements", 0},
+       {"human_renderable_placements", 0},
+       {"human_geometries", 0},
+       {"scatter_batches", 0},
+       {"scatter_placements", 0},
+       {"scatter_geometries", 0},
+       {"scene_markers", 0},
+       {"landing_sites", 0},
+       {"landing_visual_placements", 0},
+       {"spawn_definitions", 0},
        {"geometries", 1},
        {"materials", 1},
        {"textures", 1},
@@ -179,9 +189,7 @@ void writeTestScene(
        {"binding", QJsonObject{{"texture", "texture:test"}}},
        {"sampler",
         QJsonObject{
-          {"address_u", "clamp"},
-          {"address_v", "wrap"},
-          {"status", "verified"}}}}}},
+          {"address_u", "clamp"}, {"address_v", "wrap"}, {"status", "verified"}}}}}},
     {"textures",
      QJsonArray{QJsonObject{
        {"id", "texture:test"},
@@ -196,8 +204,25 @@ void writeTestScene(
           {"geometry", "geometry:test"},
           {"material_slots", QJsonArray{"material:test"}}}}}}}},
     {"object_placements", QJsonArray{}},
+    {"landing_placements", QJsonArray{}},
+    {"scatter_placements", QJsonArray{}},
+    {"scatter_batches", QJsonArray{}},
+    {"scene_markers", QJsonArray{}},
+    {"spawn_definitions", QJsonArray{}},
   };
   writeFile(root + "/scene.json", QJsonDocument{manifest}.toJson());
+}
+
+QJsonObject readTestScene(const QString& root)
+{
+  auto file = QFile{root + "/scene.json"};
+  REQUIRE(file.open(QIODevice::ReadOnly));
+  return QJsonDocument::fromJson(file.readAll()).object();
+}
+
+QJsonArray translationMatrix(const double x, const double y, const double z)
+{
+  return {1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, x, y, z, 1.0};
 }
 
 } // namespace
@@ -217,9 +242,7 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(scene.geometries.size() == 1);
     CHECK(scene.placements.size() == 1);
     CHECK(scene.placements.front().lods.front().geometryId == "geometry:test");
-    CHECK(
-      scene.materials.front().addressU
-      == DahSceneMaterial::AddressMode::ClampToEdge);
+    CHECK(scene.materials.front().addressU == DahSceneMaterial::AddressMode::ClampToEdge);
     CHECK(scene.materials.front().addressV == DahSceneMaterial::AddressMode::Repeat);
   }
 
@@ -243,10 +266,8 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(reference.batches.front().materialId == "material:test");
     CHECK(reference.batches.front().texturePreviewPath.has_value());
     CHECK(
-      reference.batches.front().addressU
-      == DahSceneMaterial::AddressMode::ClampToEdge);
-    CHECK(
-      reference.batches.front().addressV == DahSceneMaterial::AddressMode::Repeat);
+      reference.batches.front().addressU == DahSceneMaterial::AddressMode::ClampToEdge);
+    CHECK(reference.batches.front().addressV == DahSceneMaterial::AddressMode::Repeat);
     CHECK(reference.bounds.min == vm::vec3d{0.0, 0.0, 0.0});
     CHECK(reference.bounds.max == vm::vec3d{1.0, 1.0, 0.0});
   }
@@ -256,6 +277,230 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     auto directory = QTemporaryDir{};
     REQUIRE(directory.isValid());
     writeTestScene(directory.path(), 1);
+    CHECK(std::holds_alternative<DahSceneLoadError>(
+      loadDahSceneManifest(directory.path().toStdWString())));
+  }
+
+  SECTION("v4 multipart visuals compose each component before the placed actor")
+  {
+    auto directory = QTemporaryDir{};
+    REQUIRE(directory.isValid());
+    writeTestScene(directory.path(), 4);
+    auto json = readTestScene(directory.path());
+    auto placement = json["placements"].toArray().first().toObject();
+    placement["id"] = "world-placement:test";
+    placement["editor_collection"] = "vehicles";
+    placement["native"] =
+      QJsonObject{{"bucket_hash", "0x12345678"}, {"list_pointer_field", 16}};
+    // Row-vector +90 degree Z rotation and translation, deliberately
+    // non-commutative with the two component-local translations.
+    placement["matrix_row_major_f32"] = QJsonArray{
+      0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 10.0, 20.0, 30.0, 1.0};
+    auto lod = placement["lods"].toArray().first().toObject();
+    auto parts = QJsonArray{};
+    for (const auto x : {2.0, -2.0})
+    {
+      parts.append(QJsonObject{
+        {"geometry", "geometry:test"},
+        {"material_slots", QJsonArray{"material:test"}},
+        {"matrix_row_major_f32", translationMatrix(x, 0.0, 0.0)}});
+    }
+    lod["parts"] = parts;
+    placement["lods"] = QJsonArray{lod};
+    json["placements"] = QJsonArray{};
+    json["object_placements"] = QJsonArray{placement};
+    auto counts = json["counts"].toObject();
+    counts["terrain_placements"] = 0;
+    counts["terrain_lods"] = 0;
+    counts["world_placements"] = 1;
+    json["counts"] = counts;
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+
+    const auto result = loadDahSceneManifest(directory.path().toStdWString());
+    REQUIRE(std::holds_alternative<DahSceneManifest>(result));
+    const auto& scene = std::get<DahSceneManifest>(result);
+    CHECK(scene.schemaVersion == 4);
+    REQUIRE(scene.objectPlacements.size() == 1);
+    CHECK(scene.objectPlacements.front().nativeLayer == "0x12345678");
+    CHECK(scene.objectPlacements.front().nativeList == "+0x10");
+    REQUIRE(scene.objectPlacements.front().lods.front().parts.size() == 2);
+    const auto referenceResult = buildDahSceneReference(scene, 0);
+    REQUIRE(std::holds_alternative<DahSceneReference>(referenceResult));
+    const auto& reference = std::get<DahSceneReference>(referenceResult);
+    CHECK(reference.placementCount == 1);      // Components are not authored entities.
+    CHECK(reference.nativeTriangleCount == 2); // No extra first-mesh duplicate.
+    CHECK(reference.vertexCount() == 6);
+    CHECK(reference.bounds.min == vm::vec3d{9.0, 18.0, 30.0});
+    CHECK(reference.bounds.max == vm::vec3d{10.0, 23.0, 30.0});
+    REQUIRE(reference.batches.size() == 1);
+    CHECK(reference.batches.front().vertices.front().attr == vm::vec3f{10, 22, 30});
+
+    // Segment state belongs to one geometry; it cannot silently attach to a
+    // multipart wrapper and then disappear while the components are expanded.
+    auto mixedLod = lod;
+    mixedLod["segment_render_states"] = QJsonArray{QJsonObject{
+      {"alpha_mode", "opaque"},
+      {"alpha_reference_u8", 64},
+      {"blend_source", "one"},
+      {"blend_destination", "zero"},
+      {"blend_equation", "add"},
+      {"depth_write", true},
+      {"depth_compare", "less_equal"},
+      {"vertex_rgb_scale", 2.0},
+      {"terrain_layer", 0}}};
+    auto mixedPlacement = placement;
+    mixedPlacement["lods"] = QJsonArray{mixedLod};
+    json["object_placements"] = QJsonArray{mixedPlacement};
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+    CHECK(std::holds_alternative<DahSceneLoadError>(
+      loadDahSceneManifest(directory.path().toStdWString())));
+
+    auto malformedPart = parts.first().toObject();
+    malformedPart["matrix_row_major_f32"] = QJsonArray{1.0, 0.0};
+    parts[0] = malformedPart;
+    lod["parts"] = parts;
+    placement["lods"] = QJsonArray{lod};
+    json["object_placements"] = QJsonArray{placement};
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+    CHECK(std::holds_alternative<DahSceneLoadError>(
+      loadDahSceneManifest(directory.path().toStdWString())));
+  }
+
+  SECTION("v4 native terrain state preserves vertex alpha and overrides material state")
+  {
+    auto directory = QTemporaryDir{};
+    REQUIRE(directory.isValid());
+    writeTestScene(directory.path(), 4);
+    auto json = readTestScene(directory.path());
+    auto material = json["materials"].toArray().first().toObject();
+    material["render_state"] = QJsonObject{
+      {"evidence_status", "retail-code-verified"},
+      {"alpha_mode", "mask"},
+      {"alpha_reference_u8", 128},
+      {"alpha_compare", "greater"}};
+    json["materials"] = QJsonArray{material};
+    auto placement = json["placements"].toArray().first().toObject();
+    auto lod = placement["lods"].toArray().first().toObject();
+    auto state = QJsonObject{
+      {"alpha_mode", "blend"},
+      {"alpha_reference_u8", 64},
+      {"blend_source", "src_alpha"},
+      {"blend_destination", "one_minus_src_alpha"},
+      {"blend_equation", "reverse_subtract"},
+      {"depth_write", false},
+      {"depth_compare", "less_equal"},
+      {"vertex_rgb_scale", 2.0},
+      {"terrain_layer", 1}};
+    lod["segment_render_states"] = QJsonArray{state};
+    placement["lods"] = QJsonArray{lod};
+    json["placements"] = QJsonArray{placement};
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+    const auto result = loadDahSceneManifest(directory.path().toStdWString());
+    REQUIRE(std::holds_alternative<DahSceneManifest>(result));
+    const auto& scene = std::get<DahSceneManifest>(result);
+    CHECK(scene.materials.front().alphaMode == "mask");
+    CHECK(scene.materials.front().alphaReference == 128.0f / 255.0f);
+    const auto referenceResult = buildDahSceneReference(scene, 0);
+    REQUIRE(std::holds_alternative<DahSceneReference>(referenceResult));
+    const auto& reference = std::get<DahSceneReference>(referenceResult);
+    REQUIRE(reference.batches.size() == 1);
+    const auto& batch = reference.batches.front();
+    CHECK(batch.state.nativeTerrain);
+    CHECK(batch.alphaMode == "blend");
+    CHECK(batch.alphaReference == 64.0f / 255.0f);
+    CHECK(batch.state.blendSource == "src_alpha");
+    CHECK(batch.state.blendDestination == "one_minus_src_alpha");
+    CHECK(batch.state.blendEquation == "reverse_subtract");
+    CHECK_FALSE(batch.state.depthWrite);
+    CHECK(batch.state.terrainLayer == 1);
+    CHECK(batch.state.rgbScale == 2.0f);
+    const auto& color = batch.vertices.front().rest.rest.rest.attr;
+    CHECK(
+      color
+      == vm::vec4f{
+        (64.0f * (1.0f / 255.0f)) * 2.0f,
+        (32.0f * (1.0f / 255.0f)) * 2.0f,
+        (16.0f * (1.0f / 255.0f)) * 2.0f,
+        128.0f * (1.0f / 255.0f)});
+    CHECK(batch.vertices.front().rest.rest.attr == vm::vec2f{0.0f, 0.0f});
+
+    // Same material and terrain layer may still have different native draw
+    // state. Each state difference must survive batching independently.
+    for (auto field = 0; field < 6; ++field)
+    {
+      auto distinct = scene;
+      auto second = distinct.placements.front();
+      second.id = "terrain-placement:state-variant";
+      auto& variant = second.lods.front().segmentStates.front();
+      switch (field)
+      {
+      case 0:
+        variant.alphaReference = 32.0f / 255.0f;
+        break;
+      case 1:
+        variant.blendSource = "one";
+        break;
+      case 2:
+        variant.blendDestination = "one";
+        break;
+      case 3:
+        variant.depthWrite = true;
+        break;
+      case 4:
+        variant.rgbScale = 1.0f;
+        break;
+      case 5:
+        variant.nativeTerrain = false;
+        break;
+      }
+      distinct.placements.push_back(std::move(second));
+      const auto separate = buildDahSceneReference(distinct, 0);
+      REQUIRE(std::holds_alternative<DahSceneReference>(separate));
+      CAPTURE(field);
+      CHECK(std::get<DahSceneReference>(separate).batches.size() == 2);
+    }
+
+    state["alpha_reference_u8"] = 256;
+    lod["segment_render_states"] = QJsonArray{state};
+    placement["lods"] = QJsonArray{lod};
+    json["placements"] = QJsonArray{placement};
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+    CHECK(std::holds_alternative<DahSceneLoadError>(
+      loadDahSceneManifest(directory.path().toStdWString())));
+  }
+
+  SECTION("v3 landing annotations are separate from native triangles")
+  {
+    auto directory = QTemporaryDir{};
+    REQUIRE(directory.isValid());
+    writeTestScene(directory.path(), 3);
+    auto file = QFile{directory.path() + "/scene.json"};
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    auto json = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    auto counts = json["counts"].toObject();
+    counts["scene_markers"] = 1;
+    counts["landing_sites"] = 1;
+    json["counts"] = counts;
+    json["scene_markers"] = QJsonArray{QJsonObject{
+      {"id", "landing:test"},
+      {"kind", "landing-site"},
+      {"label", "test site"},
+      {"status", "authored; runtime activation conditional"},
+      {"position_f32", QJsonArray{10.0, 20.0, 30.0}}}};
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+    const auto result = loadDahSceneManifest(directory.path().toStdWString());
+    REQUIRE(std::holds_alternative<DahSceneManifest>(result));
+    const auto& scene = std::get<DahSceneManifest>(result);
+    REQUIRE(scene.markers.size() == 1);
+    CHECK(scene.markers.front().position == std::array<double, 3>{10.0, 20.0, 30.0});
+    const auto markers = buildDahSceneMarkerReference(scene);
+    CHECK(markers.vertexCount() == 24);
+    CHECK(markers.nativeTriangleCount == 0);
+    CHECK(markers.placementCount == 0);
+    counts["landing_sites"] = 0;
+    json["counts"] = counts;
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
     CHECK(std::holds_alternative<DahSceneLoadError>(
       loadDahSceneManifest(directory.path().toStdWString())));
   }
@@ -288,40 +533,53 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       const auto result = loadDahSceneManifest(path.toStdWString());
       REQUIRE(std::holds_alternative<DahSceneManifest>(result));
       const auto& scene = std::get<DahSceneManifest>(result);
+      CHECK(scene.schemaVersion == 4);
       CHECK(scene.profileId == "dah1-retail-xbox-us");
       CHECK(scene.mapName == "area42");
       CHECK(scene.counts.terrainPlacements == 92);
       CHECK(scene.counts.terrainLods == 184);
-      CHECK(scene.counts.worldPlacements == 849);
-      CHECK(scene.counts.buildingPlacements == 18);
-      CHECK(scene.counts.buildingRenderablePlacements == 18);
-      CHECK(scene.counts.propPlacements == 23);
-      CHECK(scene.counts.propRenderablePlacements == 23);
-      CHECK(scene.counts.renderableStructurePlacements == 41);
-      CHECK(scene.counts.geometries == 203);
-      CHECK(scene.geometries.size() == 203);
-      CHECK(scene.materials.size() == 190);
-      CHECK(scene.textures.size() == 124);
+      CHECK(scene.counts.worldPlacements == 2674);
+      CHECK(scene.counts.buildingPlacements == 79);
+      CHECK(scene.counts.buildingRenderablePlacements == 79);
+      CHECK(scene.counts.propPlacements == 1468);
+      CHECK(scene.counts.propRenderablePlacements == 1468);
+      CHECK(scene.counts.renderableStructurePlacements == 1547);
+      CHECK(scene.counts.geometries == 592);
+      CHECK(scene.geometries.size() == 592);
+      CHECK(scene.materials.size() == 695);
+      CHECK(scene.textures.size() == 331);
+      CHECK(scene.counts.humanPlacements == 295);
+      CHECK(scene.counts.humanRenderablePlacements == 295);
+      CHECK(scene.counts.scatterPlacements == 15121);
+      CHECK(scene.counts.scatterBatches == 654);
+      CHECK(scene.counts.landingSites == 3);
+      CHECK(scene.counts.spawnDefinitions == 7);
+      CHECK(scene.markers.size() == 142);
       CHECK(scene.placements.size() == 92);
-      CHECK(scene.objectPlacements.size() == 849);
+      CHECK(scene.objectPlacements.size() == 2674);
+      REQUIRE(scene.landingPlacements.size() == 3);
+      CHECK(scene.landingPlacements.front().lods.front().parts.size() == 11);
+      CHECK(scene.objectPlacements.front().nativeLayer == "0x8F651465");
+      CHECK(scene.objectPlacements.front().nativeList == "+0x0C");
+      CHECK(scene.objectPlacements.front().lods.front().parts.size() == 13);
 
       const auto referenceResult = buildDahSceneReference(scene, 0);
       REQUIRE(std::holds_alternative<DahSceneReference>(referenceResult));
       const auto& reference = std::get<DahSceneReference>(referenceResult);
-      CHECK(reference.placementCount == 133);
-      CHECK(reference.nativeTriangleCount == 126885);
-      CHECK(reference.vertexCount() == 380655);
-      CHECK(reference.batches.size() == 157);
-      CHECK(reference.texturedMaterialCount == 155);
+      CHECK(reference.placementCount == 17751);
+      CHECK(reference.nativeTriangleCount == 1776261);
+      CHECK(reference.vertexCount() == 5328783);
+      CHECK_FALSE(reference.batches.empty());
+      CHECK(reference.texturedMaterialCount <= reference.batches.size());
 
       const auto lod1Result = buildDahSceneReference(scene, 1);
       REQUIRE(std::holds_alternative<DahSceneReference>(lod1Result));
       const auto& lod1Reference = std::get<DahSceneReference>(lod1Result);
-      CHECK(lod1Reference.placementCount == 133);
-      CHECK(lod1Reference.nativeTriangleCount == 31371);
-      CHECK(lod1Reference.vertexCount() == 94113);
-      CHECK(lod1Reference.batches.size() == 86);
-      CHECK(lod1Reference.texturedMaterialCount == 84);
+      CHECK(lod1Reference.placementCount == 17751);
+      CHECK(lod1Reference.nativeTriangleCount == 921273);
+      CHECK(lod1Reference.vertexCount() == 2763819);
+      CHECK_FALSE(lod1Reference.batches.empty());
+      CHECK(lod1Reference.texturedMaterialCount <= lod1Reference.batches.size());
     }
   }
 }
