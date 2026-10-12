@@ -445,6 +445,47 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
         }
         material.alphaReference = static_cast<float>(reference) / 255.0f;
       }
+      const auto actorState = materialJson.value("actor_render_state");
+      if (!actorState.isUndefined() && !actorState.isNull())
+      {
+        if (!actorState.isObject())
+          throw JsonError{"Actor render state must be an object"};
+        const auto s = actorState.toObject();
+        if (optionalStringField(s, "evidence_status") == "retail-code-verified")
+        {
+          auto parsed = DahSceneRenderState{};
+          parsed.alphaMode = stringField(s, "alpha_mode");
+          const auto alpha = unsignedField(s, "alpha_reference_u8");
+          parsed.alphaReference = static_cast<float>(alpha) / 255.0f;
+          parsed.blendSource = stringField(s, "blend_source");
+          parsed.blendDestination = stringField(s, "blend_destination");
+          parsed.blendEquation = stringField(s, "blend_equation");
+          if (!s.value("depth_write").isBool() || !s.value("alpha_test_enabled").isBool()
+              || alpha > 255
+              || (parsed.alphaMode != "opaque" && parsed.alphaMode != "mask" && parsed.alphaMode != "blend")
+              || (parsed.blendSource != "one" && parsed.blendSource != "src_alpha")
+              || (parsed.blendDestination != "zero" && parsed.blendDestination != "one" && parsed.blendDestination != "one_minus_src_alpha")
+              || (parsed.blendEquation != "add" && parsed.blendEquation != "subtract" && parsed.blendEquation != "reverse_subtract")
+              || stringField(s, "alpha_compare") != "greater"
+              || stringField(s, "depth_compare") != "less_equal")
+            throw JsonError{"Unsupported native actor render state"};
+          parsed.depthWrite = s.value("depth_write").toBool();
+          parsed.alphaTest = s.value("alpha_test_enabled").toBool();
+          if (s.contains("material_opacity"))
+          {
+            const auto opacity = s.value("material_opacity");
+            if (!opacity.isDouble() || !std::isfinite(opacity.toDouble()))
+              throw JsonError{"Native material opacity must be finite"};
+            const auto shader = unsignedField(s, "native_pixel_shader_index");
+            if (shader == 0 || shader == 1)
+              parsed.rigidOpacity =
+                static_cast<float>(std::clamp(opacity.toDouble(), 0.0, 1.0));
+          }
+          // Native lighting is not reconstructed yet. Do not turn a proven
+          // pixel-shader scale into an unsupported flat-white lighting model.
+          material.actorState = std::move(parsed);
+        }
+      }
       result.materials.push_back(std::move(material));
     }
 

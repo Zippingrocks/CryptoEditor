@@ -342,7 +342,7 @@ public:
       shader.set(
         "EnableMasked",
         context.showMaterials()
-          && (batch.state.nativeTerrain || batch.alphaMode != "opaque"));
+          && (batch.state.nativeTerrain || batch.state.alphaTest || batch.alphaMode != "opaque"));
       shader.set("AlphaFuncCompare", size_t{2}); // Native GREATER comparison.
       shader.set("AlphaFuncThreshold", batch.alphaReference);
       shader.set("ApplyMaterial", applyMaterial);
@@ -560,15 +560,23 @@ DahSceneReferenceResult buildDahSceneReference(
         state.alphaMode = materialIt->second->alphaMode;
         state.alphaReference = materialIt->second->alphaReference;
         state.depthWrite = state.alphaMode != "blend";
+        if (
+          (geometry.kind == "static-world-object"
+           || geometry.kind == "human-reference-pose")
+          && materialIt->second->actorState)
+          state = *materialIt->second->actorState;
         if (!lodIt->segmentStates.empty())
           state = lodIt->segmentStates.at(segmentIndex);
+        if (geometry.kind != "static-world-object")
+          state.rigidOpacity = 1.0f;
         ++segmentIndex;
         const auto batchKey =
           materialId + ":" + geometry.kind + ":" + std::to_string(state.terrainLayer)
           + ":" + state.alphaMode + ":" + state.blendEquation + ":" + state.blendSource
           + ":" + state.blendDestination + ":" + std::to_string(state.depthWrite) + ":"
           + std::to_string(state.alphaReference) + ":" + std::to_string(state.rgbScale)
-          + ":" + std::to_string(state.nativeTerrain);
+          + ":" + std::to_string(state.nativeTerrain) + ":"
+          + std::to_string(state.alphaTest) + ":" + std::to_string(state.rigidOpacity);
         auto [batchIt, inserted] =
           batchIndices.try_emplace(batchKey, result.batches.size());
         if (inserted)
@@ -630,7 +638,7 @@ DahSceneReferenceResult buildDahSceneReference(
               native.x() * state.rgbScale,
               native.y() * state.rgbScale,
               native.z() * state.rgbScale,
-              native.w()};
+              native.w() * state.rigidOpacity};
           };
           batch.vertices.emplace_back(a, normal0, uvs[index0], color(index0));
           batch.vertices.emplace_back(b, normal1, uvs[index1], color(index1));

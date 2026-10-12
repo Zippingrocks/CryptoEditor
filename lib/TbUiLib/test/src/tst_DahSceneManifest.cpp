@@ -92,12 +92,16 @@ void writeTestScene(
   const QString& root,
   const int schemaVersion = 2,
   const bool badBufferHash = false,
-  const QString& bufferPath = "buffers.bin")
+  const QString& bufferPath = "buffers.bin",
+  const int vertexStride = 24)
 {
   auto buffer = QByteArray{};
   appendVertex(buffer, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+  buffer.append(vertexStride - 24, '\0');
   appendVertex(buffer, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f);
+  buffer.append(vertexStride - 24, '\0');
   appendVertex(buffer, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f);
+  buffer.append(vertexStride - 24, '\0');
   const auto triangleOffset = buffer.size();
   appendU32(buffer, 0);
   appendU32(buffer, 1);
@@ -164,7 +168,7 @@ void writeTestScene(
        {"counts", QJsonObject{{"vertices", 3}, {"triangles", 1}}},
        {"vertex_layout",
         QJsonObject{
-          {"stride", 24},
+          {"stride", vertexStride},
           {"position",
            QJsonObject{
              {"offset", 0},
@@ -469,6 +473,96 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       loadDahSceneManifest(directory.path().toStdWString())));
   }
 
+  SECTION("verified actor raster state does not leak into terrain or scatter")
+  {
+    auto directory = QTemporaryDir{};
+    REQUIRE(directory.isValid());
+    auto json = QJsonObject{};
+    auto material = QJsonObject{};
+    auto state = QJsonObject{
+      {"evidence_status", "retail-code-verified"},
+      {"alpha_mode", "blend"},
+      {"alpha_reference_u8", 1},
+      {"alpha_compare", "greater"},
+      {"alpha_test_enabled", true},
+      {"blend_source", "one"},
+      {"blend_destination", "one"},
+      {"blend_equation", "add"},
+      {"depth_write", false},
+      {"depth_compare", "less_equal"},
+      {"material_opacity", 0.7},
+      {"native_pixel_shader_index", 1}};
+    for (const auto& kind :
+         {"terrain", "static-scatter", "human-reference-pose", "static-world-object"})
+    {
+      const auto human = std::string{kind} == "human-reference-pose";
+      const auto rigid = std::string{kind} == "static-world-object";
+      writeTestScene(
+        directory.path(),
+        4,
+        false,
+        "buffers.bin",
+        human   ? 40
+        : rigid ? 28
+                : 24);
+      json = readTestScene(directory.path());
+      material = json["materials"].toArray().first().toObject();
+      material["actor_render_state"] = state;
+      json["materials"] = QJsonArray{material};
+      auto geometry = json["geometries"].toArray().first().toObject();
+      geometry["kind"] = kind;
+      auto layout = geometry["vertex_layout"].toObject();
+      if (human || rigid)
+        layout["normal"] = QJsonObject{
+          {"offset", human ? 12 : 20},
+          {"format", human ? "float32x3-little-endian" : "snorm16x4-little-endian"}};
+      geometry["vertex_layout"] = layout;
+      json["geometries"] = QJsonArray{geometry};
+      auto counts = json["counts"].toObject();
+      counts["human_geometries"] = human ? 1 : 0;
+      counts["scatter_geometries"] = std::string{kind} == "static-scatter" ? 1 : 0;
+      json["counts"] = counts;
+      writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+      auto result = loadDahSceneManifest(directory.path().toStdWString());
+      CAPTURE(kind);
+      if (auto* error = std::get_if<DahSceneLoadError>(&result))
+        FAIL(error->message);
+      auto scene = std::get<DahSceneManifest>(result);
+      REQUIRE(scene.materials.front().actorState);
+      const auto referenceResult = buildDahSceneReference(scene, 0);
+      REQUIRE(std::holds_alternative<DahSceneReference>(referenceResult));
+      const auto& batch = std::get<DahSceneReference>(referenceResult).batches.front();
+      CAPTURE(kind);
+      if (
+        scene.geometries.front().kind == "human-reference-pose"
+        || scene.geometries.front().kind == "static-world-object")
+      {
+        CHECK(batch.alphaMode == "blend");
+        CHECK(batch.state.blendSource == "one");
+        CHECK(batch.state.blendDestination == "one");
+        CHECK(batch.state.alphaTest);
+        CHECK_FALSE(batch.state.depthWrite);
+        CHECK(batch.alphaReference == 1.0f / 255.0f);
+        CHECK(batch.state.rgbScale == 1.0f);
+        CHECK(
+          batch.vertices.front().rest.rest.rest.attr.w()
+          == (scene.geometries.front().kind == "static-world-object" ? 0.7f : 1.0f));
+      }
+      else
+      {
+        CHECK(batch.alphaMode == "opaque");
+        CHECK_FALSE(batch.state.alphaTest);
+        CHECK(batch.state.depthWrite);
+      }
+    }
+    state["alpha_reference_u8"] = 256;
+    material["actor_render_state"] = state;
+    json["materials"] = QJsonArray{material};
+    writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+    CHECK(std::holds_alternative<DahSceneLoadError>(
+      loadDahSceneManifest(directory.path().toStdWString())));
+  }
+
   SECTION("v3 landing annotations are separate from native triangles")
   {
     auto directory = QTemporaryDir{};
@@ -544,10 +638,10 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(scene.counts.propPlacements == 1468);
       CHECK(scene.counts.propRenderablePlacements == 1468);
       CHECK(scene.counts.renderableStructurePlacements == 1547);
-      CHECK(scene.counts.geometries == 592);
-      CHECK(scene.geometries.size() == 592);
-      CHECK(scene.materials.size() == 695);
-      CHECK(scene.textures.size() == 331);
+      CHECK(scene.counts.geometries == 640);
+      CHECK(scene.geometries.size() == 640);
+      CHECK(scene.materials.size() == 790);
+      CHECK(scene.textures.size() == 337);
       CHECK(scene.counts.humanPlacements == 295);
       CHECK(scene.counts.humanRenderablePlacements == 295);
       CHECK(scene.counts.scatterPlacements == 15121);
@@ -567,8 +661,8 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       REQUIRE(std::holds_alternative<DahSceneReference>(referenceResult));
       const auto& reference = std::get<DahSceneReference>(referenceResult);
       CHECK(reference.placementCount == 17751);
-      CHECK(reference.nativeTriangleCount == 1776261);
-      CHECK(reference.vertexCount() == 5328783);
+      CHECK(reference.nativeTriangleCount == 1790050);
+      CHECK(reference.vertexCount() == 5370150);
       CHECK_FALSE(reference.batches.empty());
       CHECK(reference.texturedMaterialCount <= reference.batches.size());
 
@@ -576,8 +670,8 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       REQUIRE(std::holds_alternative<DahSceneReference>(lod1Result));
       const auto& lod1Reference = std::get<DahSceneReference>(lod1Result);
       CHECK(lod1Reference.placementCount == 17751);
-      CHECK(lod1Reference.nativeTriangleCount == 921273);
-      CHECK(lod1Reference.vertexCount() == 2763819);
+      CHECK(lod1Reference.nativeTriangleCount == 932771);
+      CHECK(lod1Reference.vertexCount() == 2798313);
       CHECK_FALSE(lod1Reference.batches.empty());
       CHECK(lod1Reference.texturedMaterialCount <= lod1Reference.batches.size());
     }

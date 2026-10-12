@@ -31,6 +31,8 @@
 #include "mdl/Grid.h"
 #include "mdl/Map.h"
 #include "mdl/MapFormat.h"
+#include "mdl/WorldNode.h"
+#include "render/Renderable.h"
 #include "ui/AppControllerFixture.h"
 #include "ui/CatchConfig.h"
 #include "ui/MapDocument.h"
@@ -49,6 +51,13 @@ struct TestResource
   void drop(gl::Gl&) const {}
 };
 
+class EmptyDahPreview : public render::DirectRenderable
+{
+public:
+  void prepare(gl::Gl&, gl::VboManager&) override {}
+  void render(render::RenderContext&) override {}
+};
+
 TEST_CASE("MapWindow")
 {
   auto appControllerFixture = AppControllerFixture{};
@@ -64,6 +73,32 @@ TEST_CASE("MapWindow")
                   | kdl::value();
 
   auto window = MapWindow{appController, std::move(document)};
+
+  SECTION("native DAH previews hide the grid without disabling snapping or its toggle")
+  {
+    auto& doc = window.document();
+    auto& map = doc.map();
+    REQUIRE(map.grid().visible());
+    const auto snap = map.grid().snap();
+    auto info = DahSceneInfo{};
+    info.bounds = vm::bbox3d{8192.0};
+    auto* layer = map.worldNode().defaultLayer();
+    doc.setDahSceneReference(
+      std::move(info),
+      layer,
+      std::make_unique<EmptyDahPreview>(),
+      layer,
+      std::make_unique<EmptyDahPreview>(),
+      nullptr,
+      nullptr);
+    CHECK_FALSE(map.grid().visible());
+    CHECK(map.grid().snap() == snap);
+    window.toggleShowGrid();
+    CHECK(map.grid().visible());
+    window.toggleShowGrid();
+    CHECK_FALSE(map.grid().visible());
+    CHECK(map.grid().snap() == snap);
+  }
 
   SECTION("load resets grid size dropdown")
   {

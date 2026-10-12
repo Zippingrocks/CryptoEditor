@@ -66,8 +66,10 @@ struct DahSceneRenderState
   std::string blendDestination = "one_minus_src_alpha";
   std::string blendEquation = "add";
   bool depthWrite = true;
+  bool alphaTest = false;
   bool nativeTerrain = false;
   float rgbScale = 1.0f;
+  float rigidOpacity = 1.0f;
   int terrainLayer = 0;
 };
 
@@ -131,6 +133,7 @@ struct DahSceneMaterial
   AddressMode addressV = AddressMode::Repeat;
   std::string alphaMode = "opaque";
   float alphaReference = 0.0f;
+  std::optional<DahSceneRenderState> actorState;
 };
 
 struct DahSceneCounts

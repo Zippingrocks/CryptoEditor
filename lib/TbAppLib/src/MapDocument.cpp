@@ -245,6 +245,12 @@ void MapDocument::setDahSceneReference(
   m_dahSceneLod1Renderer = std::move(lod1Renderer);
   m_dahSceneMarkerLayer = markerLayer;
   m_dahSceneMarkerRenderer = std::move(markerRenderer);
+  // A native reference opens as a clean preview. This is a per-document
+  // overlay choice, not a change to grid snapping or native geometry.
+  if (m_map->grid().visible())
+  {
+    m_map->grid().toggleVisible();
+  }
   documentWasLoadedNotifier();
 }
 
