@@ -104,6 +104,10 @@ struct DahSceneCounts
   std::uint64_t buildingPlacements = 0;
   std::uint64_t buildingRenderablePlacements = 0;
   std::uint64_t buildingGeometries = 0;
+  std::uint64_t propPlacements = 0;
+  std::uint64_t propRenderablePlacements = 0;
+  std::uint64_t propGeometries = 0;
+  std::uint64_t renderableStructurePlacements = 0;
   std::uint64_t geometries = 0;
   std::uint64_t materials = 0;
   std::uint64_t textures = 0;

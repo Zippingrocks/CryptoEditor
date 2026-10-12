@@ -70,7 +70,9 @@ private:
   QTabWidget* m_tabs = nullptr;
   std::vector<QTreeWidget*> m_trees;
   QTreeWidget* m_buildingsTree = nullptr;
+  QTreeWidget* m_propsTree = nullptr;
   QTreeWidgetItem* m_nativeBuildingsRoot = nullptr;
+  QTreeWidgetItem* m_nativePropsRoot = nullptr;
   NotifierConnection m_notifierConnection;
 
 public:
@@ -82,6 +84,7 @@ private:
   void connectObservers();
   void updateStatus();
   void updateNativeBuildings();
+  void updateNativeProps();
   void updateFilter(const QString& text);
 };
 

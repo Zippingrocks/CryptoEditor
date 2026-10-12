@@ -443,14 +443,26 @@ bool AppController::openDocument(const std::filesystem::path& path)
                const auto margin =
                  std::max({1024.0, size.x() * 0.05, size.y() * 0.05, size.z() * 0.05});
                const auto worldBounds = sceneBounds.expand(margin);
-               auto buildingPlacements = std::vector<DahBuildingPlacementInfo>{};
+               auto buildingPlacements = std::vector<DahObjectPlacementInfo>{};
                buildingPlacements.reserve(
                  static_cast<size_t>(manifest.counts.buildingPlacements));
+               auto propPlacements = std::vector<DahObjectPlacementInfo>{};
+               propPlacements.reserve(
+                 static_cast<size_t>(manifest.counts.propPlacements));
                for (const auto& placement : manifest.objectPlacements)
                {
                  if (placement.editorCollection == "buildings")
                  {
-                   buildingPlacements.push_back(DahBuildingPlacementInfo{
+                   buildingPlacements.push_back(DahObjectPlacementInfo{
+                     placement.id,
+                     placement.nativeClass,
+                     placement.assetName,
+                     {placement.matrix[12], placement.matrix[13], placement.matrix[14]},
+                     !placement.lods.empty()});
+                 }
+                 else if (placement.editorCollection == "props")
+                 {
+                   propPlacements.push_back(DahObjectPlacementInfo{
                      placement.id,
                      placement.nativeClass,
                      placement.assetName,
@@ -468,8 +480,10 @@ bool AppController::openDocument(const std::filesystem::path& path)
                  manifest.counts.geometries,
                  manifest.counts.worldPlacements,
                  manifest.counts.buildingPlacements,
+                 manifest.counts.propPlacements,
                  {lod0Reference.nativeTriangleCount, lod1Reference.nativeTriangleCount},
-                 std::move(buildingPlacements)};
+                 std::move(buildingPlacements),
+                 std::move(propPlacements)};
                auto lod0Renderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                auto lod1Renderer =
@@ -500,12 +514,12 @@ bool AppController::openDocument(const std::filesystem::path& path)
 
                           auto* lod0Layer = addDahDisplayLayer(
                             map,
-                            "DAH Native Scene — Terrain LOD0 + Buildings",
+                            "DAH Native Scene — Terrain LOD0 + Structures",
                             0,
                             mdl::VisibilityState::Shown);
                           auto* lod1Layer = addDahDisplayLayer(
                             map,
-                            "DAH Native Scene — Terrain LOD1 + Buildings",
+                            "DAH Native Scene — Terrain LOD1 + Structures",
                             1,
                             mdl::VisibilityState::Hidden);
                           mapWindow->document().setDahSceneReference(

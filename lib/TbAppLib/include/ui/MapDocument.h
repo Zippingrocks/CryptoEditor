@@ -91,7 +91,7 @@ struct PortalFile
   std::filesystem::path path;
 };
 
-struct DahBuildingPlacementInfo
+struct DahObjectPlacementInfo
 {
   std::string id;
   std::string nativeClass;
@@ -111,8 +111,10 @@ struct DahSceneInfo
   std::uint64_t geometryCount = 0;
   std::uint64_t worldPlacementCount = 0;
   std::uint64_t buildingPlacementCount = 0;
+  std::uint64_t propPlacementCount = 0;
   std::array<std::uint64_t, 2> nativeTriangleCounts{};
-  std::vector<DahBuildingPlacementInfo> buildingPlacements;
+  std::vector<DahObjectPlacementInfo> buildingPlacements;
+  std::vector<DahObjectPlacementInfo> propPlacements;
 };
 
 class MapDocument

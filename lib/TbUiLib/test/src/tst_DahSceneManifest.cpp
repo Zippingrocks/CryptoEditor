@@ -136,6 +136,10 @@ void writeTestScene(
        {"building_placements", 0},
        {"building_renderable_placements", 0},
        {"building_geometries", 0},
+       {"prop_placements", 0},
+       {"prop_renderable_placements", 0},
+       {"prop_geometries", 0},
+       {"renderable_structure_placements", 0},
        {"geometries", 1},
        {"materials", 1},
        {"textures", 1},
@@ -175,7 +179,9 @@ void writeTestScene(
        {"binding", QJsonObject{{"texture", "texture:test"}}},
        {"sampler",
         QJsonObject{
-          {"address_u", "clamp"}, {"address_v", "wrap"}, {"status", "verified"}}}}}},
+          {"address_u", "clamp"},
+          {"address_v", "wrap"},
+          {"status", "verified"}}}}}},
     {"textures",
      QJsonArray{QJsonObject{
        {"id", "texture:test"},
@@ -211,7 +217,9 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(scene.geometries.size() == 1);
     CHECK(scene.placements.size() == 1);
     CHECK(scene.placements.front().lods.front().geometryId == "geometry:test");
-    CHECK(scene.materials.front().addressU == DahSceneMaterial::AddressMode::ClampToEdge);
+    CHECK(
+      scene.materials.front().addressU
+      == DahSceneMaterial::AddressMode::ClampToEdge);
     CHECK(scene.materials.front().addressV == DahSceneMaterial::AddressMode::Repeat);
   }
 
@@ -235,8 +243,10 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(reference.batches.front().materialId == "material:test");
     CHECK(reference.batches.front().texturePreviewPath.has_value());
     CHECK(
-      reference.batches.front().addressU == DahSceneMaterial::AddressMode::ClampToEdge);
-    CHECK(reference.batches.front().addressV == DahSceneMaterial::AddressMode::Repeat);
+      reference.batches.front().addressU
+      == DahSceneMaterial::AddressMode::ClampToEdge);
+    CHECK(
+      reference.batches.front().addressV == DahSceneMaterial::AddressMode::Repeat);
     CHECK(reference.bounds.min == vm::vec3d{0.0, 0.0, 0.0});
     CHECK(reference.bounds.max == vm::vec3d{1.0, 1.0, 0.0});
   }
@@ -284,30 +294,34 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(scene.counts.terrainLods == 184);
       CHECK(scene.counts.worldPlacements == 849);
       CHECK(scene.counts.buildingPlacements == 18);
-      CHECK(scene.counts.geometries == 191);
-      CHECK(scene.geometries.size() == 191);
-      CHECK(scene.materials.size() == 144);
-      CHECK(scene.textures.size() == 96);
+      CHECK(scene.counts.buildingRenderablePlacements == 18);
+      CHECK(scene.counts.propPlacements == 23);
+      CHECK(scene.counts.propRenderablePlacements == 23);
+      CHECK(scene.counts.renderableStructurePlacements == 41);
+      CHECK(scene.counts.geometries == 203);
+      CHECK(scene.geometries.size() == 203);
+      CHECK(scene.materials.size() == 190);
+      CHECK(scene.textures.size() == 124);
       CHECK(scene.placements.size() == 92);
       CHECK(scene.objectPlacements.size() == 849);
 
       const auto referenceResult = buildDahSceneReference(scene, 0);
       REQUIRE(std::holds_alternative<DahSceneReference>(referenceResult));
       const auto& reference = std::get<DahSceneReference>(referenceResult);
-      CHECK(reference.placementCount == 109);
-      CHECK(reference.nativeTriangleCount == 116029);
-      CHECK(reference.vertexCount() == 348087);
-      CHECK(reference.batches.size() == 124);
-      CHECK(reference.texturedMaterialCount == 122);
+      CHECK(reference.placementCount == 133);
+      CHECK(reference.nativeTriangleCount == 126885);
+      CHECK(reference.vertexCount() == 380655);
+      CHECK(reference.batches.size() == 157);
+      CHECK(reference.texturedMaterialCount == 155);
 
       const auto lod1Result = buildDahSceneReference(scene, 1);
       REQUIRE(std::holds_alternative<DahSceneReference>(lod1Result));
       const auto& lod1Reference = std::get<DahSceneReference>(lod1Result);
-      CHECK(lod1Reference.placementCount == 109);
-      CHECK(lod1Reference.nativeTriangleCount == 20515);
-      CHECK(lod1Reference.vertexCount() == 61545);
-      CHECK(lod1Reference.batches.size() == 53);
-      CHECK(lod1Reference.texturedMaterialCount == 51);
+      CHECK(lod1Reference.placementCount == 133);
+      CHECK(lod1Reference.nativeTriangleCount == 31371);
+      CHECK(lod1Reference.vertexCount() == 94113);
+      CHECK(lod1Reference.batches.size() == 86);
+      CHECK(lod1Reference.texturedMaterialCount == 84);
     }
   }
 }

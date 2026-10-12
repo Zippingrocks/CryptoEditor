@@ -107,7 +107,8 @@ vm::vec3f transformPosition(
       + matrix[14])};
 }
 
-vm::vec3f transformNormal(const vm::vec3f& normal, const std::array<double, 16>& matrix)
+vm::vec3f transformNormal(
+  const vm::vec3f& normal, const std::array<double, 16>& matrix)
 {
   auto transformed = vm::vec3f{
     static_cast<float>(
@@ -279,20 +280,23 @@ public:
       const auto applyMaterial = context.showMaterials() && texture != nullptr;
       shader.set("ApplyMaterial", applyMaterial);
       shader.set(
-        "Color", applyMaterial ? Color{RgbaF{1.0f, 1.0f, 1.0f, 1.0f}} : batch.fallback);
+        "Color",
+        applyMaterial ? Color{RgbaF{1.0f, 1.0f, 1.0f, 1.0f}} : batch.fallback);
       if (applyMaterial)
       {
         batch.material->activate(gl, context.minFilterMode(), context.magFilterMode());
         gl.texParameteri(
           GL_TEXTURE_2D,
           GL_TEXTURE_WRAP_S,
-          batch.addressU == DahSceneMaterial::AddressMode::ClampToEdge ? GL_CLAMP_TO_EDGE
-                                                                       : GL_REPEAT);
+          batch.addressU == DahSceneMaterial::AddressMode::ClampToEdge
+            ? GL_CLAMP_TO_EDGE
+            : GL_REPEAT);
         gl.texParameteri(
           GL_TEXTURE_2D,
           GL_TEXTURE_WRAP_T,
-          batch.addressV == DahSceneMaterial::AddressMode::ClampToEdge ? GL_CLAMP_TO_EDGE
-                                                                       : GL_REPEAT);
+          batch.addressV == DahSceneMaterial::AddressMode::ClampToEdge
+            ? GL_CLAMP_TO_EDGE
+            : GL_REPEAT);
       }
       if (batch.vertexArray.setup(gl, shader.program()))
       {
@@ -372,8 +376,7 @@ DahSceneReferenceResult buildDahSceneReference(
                                    const bool requireRequestedLod) {
       auto lodIt = std::ranges::find_if(
         placement.lods, [&](const auto& lod) { return lod.index == lodIndex; });
-      if (
-        lodIt == placement.lods.end() && !requireRequestedLod && !placement.lods.empty())
+      if (lodIt == placement.lods.end() && !requireRequestedLod && !placement.lods.empty())
       {
         lodIt = placement.lods.begin();
       }
@@ -488,9 +491,12 @@ DahSceneReferenceResult buildDahSceneReference(
           const auto& b = positions[index1];
           const auto& c = positions[index2];
           const auto flatNormal = faceNormal(a, b, c);
-          const auto& normal0 = geometry.kind == "terrain" ? flatNormal : normals[index0];
-          const auto& normal1 = geometry.kind == "terrain" ? flatNormal : normals[index1];
-          const auto& normal2 = geometry.kind == "terrain" ? flatNormal : normals[index2];
+          const auto& normal0 =
+            geometry.kind == "terrain" ? flatNormal : normals[index0];
+          const auto& normal1 =
+            geometry.kind == "terrain" ? flatNormal : normals[index1];
+          const auto& normal2 =
+            geometry.kind == "terrain" ? flatNormal : normals[index2];
           batch.vertices.emplace_back(a, normal0, uvs[index0], colors[index0]);
           batch.vertices.emplace_back(b, normal1, uvs[index1], colors[index1]);
           batch.vertices.emplace_back(c, normal2, uvs[index2], colors[index2]);
@@ -514,7 +520,9 @@ DahSceneReferenceResult buildDahSceneReference(
     }
     for (const auto& placement : manifest.objectPlacements)
     {
-      if (placement.editorCollection == "buildings")
+      if (
+        placement.editorCollection == "buildings"
+        || placement.editorCollection == "props")
       {
         appendPlacement(placement, false);
       }

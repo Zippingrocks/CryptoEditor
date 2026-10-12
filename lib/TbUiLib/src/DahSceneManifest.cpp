@@ -152,6 +152,10 @@ DahSceneCounts parseCounts(const QJsonObject &object) {
           unsignedField(object, "building_placements"),
           unsignedField(object, "building_renderable_placements"),
           unsignedField(object, "building_geometries"),
+          unsignedField(object, "prop_placements"),
+          unsignedField(object, "prop_renderable_placements"),
+          unsignedField(object, "prop_geometries"),
+          unsignedField(object, "renderable_structure_placements"),
           unsignedField(object, "geometries"),
           unsignedField(object, "materials"),
           unsignedField(object, "textures"),
@@ -170,8 +174,10 @@ void validateArea42Counts(const DahSceneManifest &manifest) {
   if (counts.terrainPlacements != 92 || counts.terrainLods != 184 ||
       counts.terrainGeometries != 184 || counts.worldBuckets != 41 ||
       counts.worldPlacements != 849 || counts.buildingPlacements != 18 ||
-      counts.buildingRenderablePlacements != 17 ||
-      counts.buildingGeometries != 7 || counts.geometries != 191 ||
+      counts.buildingRenderablePlacements != 18 ||
+      counts.buildingGeometries != 8 || counts.propPlacements != 23 ||
+      counts.propRenderablePlacements != 23 || counts.propGeometries != 11 ||
+      counts.renderableStructurePlacements != 41 || counts.geometries != 203 ||
       counts.lod0Vertices != 122956 || counts.lod0Triangles != 103634 ||
       counts.lod1Vertices != 16240 || counts.lod1Triangles != 8120) {
     throw JsonError{"Area 42 scene has unexpected native geometry counts"};
@@ -430,6 +436,17 @@ loadDahSceneManifest(const std::filesystem::path &sceneDirectory) {
               return placement.editorCollection == "buildings" &&
                      !placement.lods.empty();
             }));
+    const auto propPlacementCount =
+        static_cast<std::uint64_t>(std::ranges::count_if(
+            result.objectPlacements, [](const auto &placement) {
+              return placement.editorCollection == "props";
+            }));
+    const auto renderablePropCount =
+        static_cast<std::uint64_t>(std::ranges::count_if(
+            result.objectPlacements, [](const auto &placement) {
+              return placement.editorCollection == "props" &&
+                     !placement.lods.empty();
+            }));
 
     if (result.geometries.size() != result.counts.geometries ||
         result.materials.size() != result.counts.materials ||
@@ -438,7 +455,11 @@ loadDahSceneManifest(const std::filesystem::path &sceneDirectory) {
         result.objectPlacements.size() != result.counts.worldPlacements ||
         terrainLodCount != result.counts.terrainLods ||
         buildingPlacementCount != result.counts.buildingPlacements ||
-        renderableBuildingCount != result.counts.buildingRenderablePlacements) {
+        renderableBuildingCount != result.counts.buildingRenderablePlacements ||
+        propPlacementCount != result.counts.propPlacements ||
+        renderablePropCount != result.counts.propRenderablePlacements ||
+        renderableBuildingCount + renderablePropCount !=
+            result.counts.renderableStructurePlacements) {
       throw JsonError{"Scene collection counts do not match the manifest"};
     }
     validateArea42Counts(result);

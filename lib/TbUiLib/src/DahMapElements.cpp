@@ -337,6 +337,10 @@ QWidget* DahMapElements::createTab(const DahMapElementTab tab)
   {
     m_buildingsTree = tree;
   }
+  else if (tab == DahMapElementTab::Props)
+  {
+    m_propsTree = tree;
+  }
 
   auto collections = std::map<std::string_view, QTreeWidgetItem*>{};
   for (const auto& group : Groups)
@@ -388,12 +392,14 @@ void DahMapElements::updateStatus()
   if (const auto* scene = m_document.dahSceneInfo())
   {
     m_status->setText(
-      tr("%1: %2 native world placements, including %3 building/world-object "
-         "placements. Renderable structures use their retail archetype, transform, "
-         "mesh, material slots, and textures.")
+      tr("%1: %2 native world placements, including %3 building and %4 PropType "
+         "set-piece placements. All %5 structures use their retail archetype, "
+         "transform, mesh, material slots, and textures.")
         .arg(QString::fromStdString(scene->mapName))
         .arg(scene->worldPlacementCount)
-        .arg(scene->buildingPlacementCount));
+        .arg(scene->buildingPlacementCount)
+        .arg(scene->propPlacementCount)
+        .arg(scene->buildingPlacementCount + scene->propPlacementCount));
   }
   else
   {
@@ -402,6 +408,7 @@ void DahMapElements::updateStatus()
          "resources; placement is disabled until the relevant adapter is implemented."));
   }
   updateNativeBuildings();
+  updateNativeProps();
 }
 
 void DahMapElements::updateNativeBuildings()
@@ -433,7 +440,8 @@ void DahMapElements::updateNativeBuildings()
   auto archetypes = std::map<std::string, QTreeWidgetItem*>{};
   for (const auto& placement : scene->buildingPlacements)
   {
-    const auto label = placement.assetName.empty() ? placement.id : placement.assetName;
+    const auto label =
+      placement.assetName.empty() ? placement.id : placement.assetName;
     auto [it, inserted] = archetypes.try_emplace(label, nullptr);
     if (inserted)
     {
@@ -441,15 +449,66 @@ void DahMapElements::updateNativeBuildings()
         m_nativeBuildingsRoot,
         {QString::fromStdString(label), QString::fromStdString(placement.nativeClass)}};
     }
-    const auto position =
-      tr("x %1, y %2, z %3 — %4")
-        .arg(placement.position[0], 0, 'f', 2)
-        .arg(placement.position[1], 0, 'f', 2)
-        .arg(placement.position[2], 0, 'f', 2)
-        .arg(placement.renderable ? tr("native mesh") : tr("placement preserved"));
+    const auto position = tr("x %1, y %2, z %3 — %4")
+                            .arg(placement.position[0], 0, 'f', 2)
+                            .arg(placement.position[1], 0, 'f', 2)
+                            .arg(placement.position[2], 0, 'f', 2)
+                            .arg(
+                              placement.renderable ? tr("native mesh")
+                                                   : tr("placement preserved"));
     new QTreeWidgetItem{it->second, {QString::fromStdString(placement.id), position}};
   }
   m_nativeBuildingsRoot->setExpanded(true);
+}
+
+void DahMapElements::updateNativeProps()
+{
+  if (m_propsTree == nullptr)
+  {
+    return;
+  }
+  if (m_nativePropsRoot != nullptr)
+  {
+    delete m_propsTree->takeTopLevelItem(
+      m_propsTree->indexOfTopLevelItem(m_nativePropsRoot));
+    m_nativePropsRoot = nullptr;
+  }
+  const auto* scene = m_document.dahSceneInfo();
+  if (scene == nullptr)
+  {
+    return;
+  }
+
+  m_nativePropsRoot = new QTreeWidgetItem{
+    m_propsTree,
+    {tr("%1 Native Placements").arg(QString::fromStdString(scene->mapName)),
+     tr("Retail world.instance-database")}};
+  auto font = m_nativePropsRoot->font(0);
+  font.setBold(true);
+  m_nativePropsRoot->setFont(0, font);
+
+  auto archetypes = std::map<std::string, QTreeWidgetItem*>{};
+  for (const auto& placement : scene->propPlacements)
+  {
+    const auto label =
+      placement.assetName.empty() ? placement.id : placement.assetName;
+    auto [it, inserted] = archetypes.try_emplace(label, nullptr);
+    if (inserted)
+    {
+      it->second = new QTreeWidgetItem{
+        m_nativePropsRoot,
+        {QString::fromStdString(label), QString::fromStdString(placement.nativeClass)}};
+    }
+    const auto position = tr("x %1, y %2, z %3 — %4")
+                            .arg(placement.position[0], 0, 'f', 2)
+                            .arg(placement.position[1], 0, 'f', 2)
+                            .arg(placement.position[2], 0, 'f', 2)
+                            .arg(
+                              placement.renderable ? tr("native mesh")
+                                                   : tr("placement preserved"));
+    new QTreeWidgetItem{it->second, {QString::fromStdString(placement.id), position}};
+  }
+  m_nativePropsRoot->setExpanded(true);
 }
 
 void DahMapElements::updateFilter(const QString& text)
