@@ -12,6 +12,7 @@ rename before DAH support exists.
 
 ## Upstream baseline
 
+- Repository: <https://github.com/Zippingrocks/CryptoEditor>
 - Upstream: <https://github.com/TrenchBroom/TrenchBroom>
 - Baseline revision: `30dd5b6189487f666cea6f1b6502dcabd13809a5`
 - Local upstream remote: `upstream`
