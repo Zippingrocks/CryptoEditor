@@ -174,7 +174,7 @@ auto createAppController()
              fmt::format(R"(Game configurations could not be loaded: {})", e.msg);
 
            QMessageBox::critical(
-             nullptr, "TrenchBroom", QString::fromStdString(msg), QMessageBox::Ok);
+             nullptr, "CryptoEditor", QString::fromStdString(msg), QMessageBox::Ok);
            QCoreApplication::exit(1);
          })
          | kdl::value();
@@ -312,11 +312,11 @@ int main(int argc, char* argv[])
   }
 
   // Needs to be set before creating the preference manager
-  QApplication::setApplicationName("TrenchBroom");
+  QApplication::setApplicationName("CryptoEditor");
   // Needs to be "" otherwise Qt adds this to the paths returned by QStandardPaths
   // which would cause preferences to move from where they were with wx
   QApplication::setOrganizationName("");
-  QApplication::setOrganizationDomain("io.github.trenchbroom");
+  QApplication::setOrganizationDomain("io.github.zippingrocks.cryptoeditor");
 
   // QApplication must be created before QPreferenceStore because QPreferenceStore uses
   // QFileSystemWatcher, which requires a QApplication instance

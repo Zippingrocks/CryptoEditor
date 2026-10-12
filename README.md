@@ -1,8 +1,18 @@
-# TrenchBroom
+# CryptoEditor
+
+CryptoEditor is the brush-first world and level editor for the **Destroy All
+Humans! Pandemic Development Suite**. DAH-native support is under active
+development; see [the CryptoEditor architecture and delivery sequence](CRYPTOEDITOR.md).
+
+CryptoEditor is derived from
+[TrenchBroom](https://github.com/TrenchBroom/TrenchBroom), a modern
+cross-platform level editor for Quake-engine games. The upstream source layout,
+copyright notices, and GPLv3 license are retained so upstream merges remain
+auditable and practical.
+
+## TrenchBroom foundation
 
 [![TrenchBroom Icon](app/TrenchBroom/resources/graphics/images/AppIcon.png)](https://www.youtube.com/watch?v=shcAvnYp9ow)
-
-TrenchBroom is a modern cross-platform level editor for Quake-engine based games.
 
 - Trailer:   https://www.youtube.com/watch?v=shcAvnYp9ow
 - Website:   https://github.com/TrenchBroom/TrenchBroom

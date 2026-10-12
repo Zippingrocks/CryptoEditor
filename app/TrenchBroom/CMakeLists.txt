@@ -149,11 +149,12 @@ endif()
 add_dependencies(TrenchBroom GenerateManual)
 
 set_target_properties(TrenchBroom PROPERTIES AUTORCC TRUE)
+set_target_properties(TrenchBroom PROPERTIES OUTPUT_NAME "CryptoEditor")
 
 if(APPLE)
     # Configure variables that are substituted into the plist
     # Set CFBundleName, which controls the application menu label
-    set_target_properties(TrenchBroom PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME "TrenchBroom")
+    set_target_properties(TrenchBroom PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME "CryptoEditor")
     # Set CFBundleShortVersionString to "2.0.0". This is displayed in the Finder and Spotlight.
     set_target_properties(TrenchBroom PROPERTIES MACOSX_BUNDLE_SHORT_VERSION_STRING "${CPACK_PACKAGE_VERSION}")
     # Set CFBundleVersion to the git describe output. Apple docs say it should be "three non-negative, period-separated integers with the first integer being greater than zero"
@@ -243,12 +244,12 @@ endif()
 
 # Generate a small stripped PDB for release builds so we get stack traces with symbols
 if(COMPILER_IS_MSVC)
-    set_target_properties(TrenchBroom PROPERTIES LINK_FLAGS_RELEASE "/DEBUG /PDBSTRIPPED:app/TrenchBroom/TrenchBroom-stripped.pdb /PDBALTPATH:TrenchBroom-stripped.pdb")
+    set_target_properties(TrenchBroom PROPERTIES LINK_FLAGS_RELEASE "/DEBUG /PDBSTRIPPED:app/TrenchBroom/CryptoEditor-stripped.pdb /PDBALTPATH:CryptoEditor-stripped.pdb")
 endif()
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
     # Make executable name conventional lowercase on linux
-    string(TOLOWER TrenchBroom APP_TARGET_NAME_LOWER)
+    string(TOLOWER CryptoEditor APP_TARGET_NAME_LOWER)
     set_target_properties(TrenchBroom PROPERTIES OUTPUT_NAME ${APP_TARGET_NAME_LOWER})
 endif()
 
@@ -333,10 +334,10 @@ if(WIN32 OR ${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
 endif()
 
 # Common CPack configuration
-set(APP_PACKAGE_FILE_NAME "TrenchBroom-${APP_PLATFORM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${GIT_DESCRIBE}-${CMAKE_BUILD_TYPE}")
+set(APP_PACKAGE_FILE_NAME "CryptoEditor-${APP_PLATFORM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-${GIT_DESCRIBE}-${CMAKE_BUILD_TYPE}")
 set(CPACK_PACKAGE_FILE_NAME ${APP_PACKAGE_FILE_NAME})
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "TrenchBroom Level Editor")
-set(CPACK_PACKAGE_VENDOR "TrenchBroom")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "CryptoEditor Level Editor")
+set(CPACK_PACKAGE_VENDOR "Destroy All Humans! Pandemic Development Suite")
 # We want stack trace symbols even in our release builds, so don't strip.
 set(CPACK_STRIP_FILES FALSE)
 
@@ -345,11 +346,11 @@ if(WIN32)
     # Copy PDB files (msvc debug symbols)
     if(COMPILER_IS_MSVC)
         install(FILES
-            "$<TARGET_FILE_DIR:TrenchBroom>/TrenchBroom.pdb"
+            "$<TARGET_FILE_DIR:TrenchBroom>/CryptoEditor.pdb"
             DESTINATION . COMPONENT TrenchBroom
             CONFIGURATIONS Debug RelWithDebInfo)
         install(FILES
-            "$<TARGET_FILE_DIR:TrenchBroom>/TrenchBroom-stripped.pdb"
+            "$<TARGET_FILE_DIR:TrenchBroom>/CryptoEditor-stripped.pdb"
             DESTINATION . COMPONENT TrenchBroom
             CONFIGURATIONS Release)
     endif()
