@@ -149,6 +149,7 @@ public:
 public: // getters and such
   Logger& logger() const;
   QAction* findAction(const std::filesystem::path& path);
+  bool documentReadOnly() const;
 
 private: // title bar contents
   void updateTitle();

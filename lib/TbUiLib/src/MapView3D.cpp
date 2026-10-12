@@ -136,6 +136,16 @@ void MapView3D::connectObservers()
 {
   m_notifierConnection +=
     m_camera->cameraDidChangeNotifier.connect(this, &MapView3D::cameraDidChange);
+  m_notifierConnection += m_document.documentWasLoadedNotifier.connect([this]() {
+    if (const auto* scene = m_document.dahSceneInfo())
+    {
+      const auto center = vm::vec3f{scene->bounds.center()};
+      const auto distance = vm::length(vm::vec3f{scene->bounds.size()}) * 0.9f + 128.0f;
+      m_camera->moveTo(center + vm::vec3f{-distance, -distance, distance * 0.65f});
+      m_camera->lookAt(center, vm::vec3f{0.0f, 0.0f, 1.0f});
+      update();
+    }
+  });
 
   auto& prefs = PreferenceManager::instance();
   m_notifierConnection +=
@@ -562,6 +572,10 @@ void MapView3D::renderMap(
   render::RenderBatch& renderBatch)
 {
   renderer.render(renderContext, renderBatch);
+  if (auto* dahSceneRenderer = m_document.dahSceneRenderer())
+  {
+    renderBatch.add(dahSceneRenderer);
+  }
 
   const auto& map = m_document.map();
   if (const auto& bounds = map.selectionBounds();

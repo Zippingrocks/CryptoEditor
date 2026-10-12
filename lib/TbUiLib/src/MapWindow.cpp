@@ -111,7 +111,6 @@
 #include "ui/ViewUtils.h"
 #include "ui/WadUtils.h"
 #include "ui/WidgetState.h"
-#include "update/Updater.h"
 
 #include "kd/const_overload.h"
 #include "kd/contracts.h"
@@ -303,11 +302,24 @@ QAction* MapWindow::findAction(const std::filesystem::path& path)
   return nullptr;
 }
 
+bool MapWindow::documentReadOnly() const
+{
+  return m_document->isDahScene();
+}
+
 void MapWindow::updateTitle()
 {
+  if (const auto* scene = m_document->dahSceneInfo())
+  {
+    setWindowModified(false);
+    setWindowTitle(tr("%1 — CryptoEditor [DAH reference, read only]")
+                     .arg(QString::fromStdString(scene->mapName)));
+    setWindowFilePath(pathAsQPath(scene->path));
+    return;
+  }
   const auto& map = m_document->map();
   setWindowModified(map.modified());
-  setWindowTitle(tr("%1[*] - TrenchBroom").arg(pathAsQString(map.filename())));
+  setWindowTitle(tr("%1[*] - CryptoEditor").arg(pathAsQString(map.filename())));
   setWindowFilePath(pathAsQPath(map.path()));
 }
 
@@ -408,6 +420,11 @@ void MapWindow::removeRecentDocumentsMenu()
 
 void MapWindow::updateRecentDocumentsMenu()
 {
+  if (const auto* scene = m_document->dahSceneInfo())
+  {
+    m_appController.recentDocuments().updatePath(scene->path);
+    return;
+  }
   const auto& map = m_document->map();
   const auto path = map.path();
   if (path.is_absolute())
@@ -419,7 +436,7 @@ void MapWindow::updateRecentDocumentsMenu()
 void MapWindow::createGui()
 {
   setWindowIconTB(this);
-  setWindowTitle("TrenchBroom");
+  setWindowTitle("CryptoEditor");
 
   m_hSplitter = new Splitter{Qt::Horizontal, DrawKnob::No};
   m_hSplitter->setChildrenCollapsible(false);
@@ -527,7 +544,6 @@ void MapWindow::createStatusBar()
 {
   m_statusBarLabel = new QLabel{};
   statusBar()->addWidget(m_statusBarLabel, 1);
-  statusBar()->addWidget(m_appController.updater().createUpdateIndicator());
 }
 
 namespace
@@ -754,6 +770,15 @@ QString describeSelection(const mdl::Map& map)
 
 void MapWindow::updateStatusBar()
 {
+  if (const auto* scene = m_document->dahSceneInfo())
+  {
+    m_statusBarLabel->setText(tr("   DAH reference   |   %1 placements   |   LOD%2   |   "
+                                 "%3 native triangles   |   read only")
+                                .arg(scene->placementCount)
+                                .arg(scene->displayedLod)
+                                .arg(scene->nativeTriangleCount));
+    return;
+  }
   m_statusBarLabel->setText(QString{describeSelection(m_document->map())});
 }
 
@@ -822,6 +847,7 @@ void MapWindow::connectObservers()
 void MapWindow::documentWasLoaded()
 {
   updateTitle();
+  updateStatusBar();
   updateActionState();
   updateUndoRedoActions();
   updateToolBarWidgets();
@@ -992,6 +1018,11 @@ void MapWindow::bindEvents()
 
 bool MapWindow::saveDocument()
 {
+  if (documentReadOnly())
+  {
+    logger().warn() << "DAH reference scenes are read only";
+    return false;
+  }
   auto& map = m_document->map();
 
   if (map.persistent())
@@ -1021,6 +1052,11 @@ bool MapWindow::saveDocument()
 
 bool MapWindow::saveDocumentAs()
 {
+  if (documentReadOnly())
+  {
+    logger().warn() << "DAH reference scenes are read only";
+    return false;
+  }
   auto& map = m_document->map();
 
   const auto defaultPath = map.persistent()
@@ -1059,6 +1095,10 @@ bool MapWindow::saveDocumentAs()
 
 void MapWindow::revertDocument()
 {
+  if (documentReadOnly())
+  {
+    return;
+  }
   auto& map = m_document->map();
   if (map.persistent() && confirmRevertDocument())
   {
@@ -1142,7 +1182,7 @@ bool MapWindow::confirmOrDiscardChanges()
 
   const auto result = QMessageBox::question(
     this,
-    "TrenchBroom",
+    "CryptoEditor",
     tr("%1 has been modified. Do you want to save the changes?")
       .arg(pathAsQString(map.filename())),
     QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
@@ -1166,7 +1206,7 @@ bool MapWindow::confirmRevertDocument()
   }
 
   auto messageBox = QMessageBox{this};
-  messageBox.setWindowTitle("TrenchBroom");
+  messageBox.setWindowTitle("CryptoEditor");
   messageBox.setIcon(QMessageBox::Question);
   messageBox.setText(tr("Revert %1 to %2?")
                        .arg(pathAsQString(map.filename()))

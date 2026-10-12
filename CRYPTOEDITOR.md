@@ -42,20 +42,24 @@ materials, textures, unknown fields, validation, and—only after round-trip
 gates pass—package writing.
 
 The first boundary is the versioned, read-only `.dahscene` v1 directory emitted
-by `dahdev`. CryptoEditor now has a strict manifest loader that verifies the
+by `dahdev`. CryptoEditor has a strict manifest loader that verifies the
 schema, read-only marker, package and buffer-view hashes, path containment,
 geometry references, collection counts, and Area 42's exact native geometry
-counts before accepting a scene. A converted heightmap or Battlefront
-`.wld`/`.ter` file must never become the authoritative representation of a DAH
-map.
+counts before accepting a scene. It opens an accepted scene as a read-only DAH
+reference document, decodes the native LOD0 triangle views, applies all 92
+placement matrices, frames the terrain in the 3D viewport, and retains the
+ordinary empty brush layer for future authored geometry. Native save, autosave,
+revert, and misleading map/OBJ exports are disabled for this document type. A
+converted heightmap or Battlefront `.wld`/`.ter` file must never become the
+authoritative representation of a DAH map.
 
 ## Delivery sequence
 
 1. Keep the upstream editor building and tested on Windows.
-2. **In progress:** connect the verified `.dahscene` loader to a read-only DAH
-   game configuration and document-open path.
-3. Render the verified 92 terrain placements, both native LODs, candidate UVs,
-   materials, and textures; report unresolved dependencies explicitly.
+2. **Complete:** connect the verified `.dahscene` loader to a read-only DAH
+   document-open path and render all 92 native terrain placements at LOD0.
+3. **In progress:** add LOD switching, candidate UVs, material batches, and
+   decoded textures; report unresolved dependencies explicitly.
 4. Add terrain selection and inspection without changing package data.
 5. Add brush-to-native geometry workflows alongside native terrain editing.
 6. Prove byte-preserving unchanged serialization.

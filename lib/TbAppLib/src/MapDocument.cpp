@@ -41,6 +41,7 @@
 #include "mdl/WorldReader.h"
 #include "prefs/Preferences.h"
 #include "render/MapRenderer.h"
+#include "render/Renderable.h"
 
 #include "kd/contracts.h"
 #include "kd/filesystem_utils.h"
@@ -170,11 +171,16 @@ Result<void> MapDocument::reload()
 
 void MapDocument::triggerAutosave()
 {
-  m_autosaver->triggerAutosave();
+  if (!isDahScene())
+  {
+    m_autosaver->triggerAutosave();
+  }
 }
 
 void MapDocument::setMap(std::unique_ptr<mdl::Map> map)
 {
+  m_dahSceneInfo = std::nullopt;
+  m_dahSceneRenderer = nullptr;
   m_map = std::move(map);
   m_mapRenderer = std::make_unique<render::MapRenderer>(*m_map);
   m_autosaver = std::make_unique<mdl::Autosaver>(*m_map);
@@ -212,6 +218,30 @@ render::MapRenderer& MapDocument::mapRenderer()
 const render::MapRenderer& MapDocument::mapRenderer() const
 {
   return *m_mapRenderer;
+}
+
+void MapDocument::setDahSceneReference(
+  DahSceneInfo info, std::unique_ptr<render::DirectRenderable> renderer)
+{
+  contract_pre(renderer != nullptr);
+  m_dahSceneInfo = std::move(info);
+  m_dahSceneRenderer = std::move(renderer);
+  documentWasLoadedNotifier();
+}
+
+const DahSceneInfo* MapDocument::dahSceneInfo() const
+{
+  return m_dahSceneInfo ? &*m_dahSceneInfo : nullptr;
+}
+
+render::DirectRenderable* MapDocument::dahSceneRenderer() const
+{
+  return m_dahSceneRenderer.get();
+}
+
+bool MapDocument::isDahScene() const
+{
+  return m_dahSceneInfo.has_value();
 }
 
 Logger& MapDocument::logger()

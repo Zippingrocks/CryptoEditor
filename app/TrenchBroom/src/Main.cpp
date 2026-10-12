@@ -341,9 +341,6 @@ int main(int argc, char* argv[])
   installFileEventFilter(*appController);
 #endif
 
-  appController->askForAutoUpdates();
-  appController->triggerAutoUpdateCheck();
-
   if (!parseCommandLineAndOpenFiles(*appController))
   {
     appController->showWelcomeWindow();

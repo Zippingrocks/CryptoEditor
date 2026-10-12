@@ -26,26 +26,24 @@
 #include <QStringBuilder>
 #include <QVBoxLayout>
 
-#include "ui/AppController.h"
 #include "ui/BorderLine.h"
 #include "ui/ClickableLabel.h"
 #include "ui/GetVersion.h"
 #include "ui/ImageUtils.h"
 #include "ui/QStyleUtils.h"
 #include "ui/ViewConstants.h"
-#include "update/Updater.h"
 
 namespace tb::ui
 {
 
-AppInfoPanel::AppInfoPanel(AppController& appController, QWidget* parent)
+AppInfoPanel::AppInfoPanel(AppController&, QWidget* parent)
   : QWidget{parent}
 {
   auto appIconImage = loadPixmap("AppIcon.png");
   auto* appIcon = new QLabel{};
   appIcon->setPixmap(appIconImage);
 
-  auto* appName = new QLabel{tr("TrenchBroom")};
+  auto* appName = new QLabel{tr("CryptoEditor")};
   setHeaderStyle(appName);
 
   auto* appLine = new BorderLine{};
@@ -70,18 +68,6 @@ AppInfoPanel::AppInfoPanel(AppController& appController, QWidget* parent)
   connect(build, &ClickableLabel::clicked, this, &AppInfoPanel::versionInfoClicked);
   connect(qtVersion, &ClickableLabel::clicked, this, &AppInfoPanel::versionInfoClicked);
 
-  auto* updateIndicator = appController.updater().createUpdateIndicator();
-  setInfoStyle(updateIndicator);
-
-  auto* versionLayout = new QHBoxLayout{};
-  versionLayout->setContentsMargins(0, 0, 0, 0);
-  versionLayout->setSpacing(LayoutConstants::MediumHMargin);
-  versionLayout->addWidget(version);
-  versionLayout->addWidget(updateIndicator);
-
-  auto* versionWidget = new QWidget{};
-  versionWidget->setLayout(versionLayout);
-
   auto* layout = new QVBoxLayout{};
   layout->setContentsMargins(20, 20, 20, 20);
   layout->setSpacing(2);
@@ -90,7 +76,7 @@ AppInfoPanel::AppInfoPanel(AppController& appController, QWidget* parent)
   layout->addWidget(appName, 0, Qt::AlignHCenter);
   layout->addWidget(appLine);
   layout->addWidget(appClaim, 0, Qt::AlignHCenter);
-  layout->addWidget(versionWidget, 0, Qt::AlignHCenter);
+  layout->addWidget(version, 0, Qt::AlignHCenter);
   layout->addWidget(build, 0, Qt::AlignHCenter);
   layout->addWidget(qtVersion, 0, Qt::AlignHCenter);
   layout->addStretch();
@@ -101,7 +87,7 @@ AppInfoPanel::AppInfoPanel(AppController& appController, QWidget* parent)
 void AppInfoPanel::versionInfoClicked()
 {
   const auto str =
-    tr("TrenchBroom %1 Build %2").arg(getBuildVersion()).arg(getBuildIdStr());
+    tr("CryptoEditor %1 Build %2").arg(getBuildVersion()).arg(getBuildIdStr());
 
   QApplication::clipboard()->setText(str);
 }

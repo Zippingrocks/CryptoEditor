@@ -26,6 +26,7 @@
 #include "vm/bbox.h"
 #include "vm/polygon.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -67,8 +68,9 @@ struct SelectionChange;
 
 namespace render
 {
+class DirectRenderable;
 class MapRenderer;
-}
+} // namespace render
 
 namespace ui
 {
@@ -85,6 +87,19 @@ struct PortalFile
 {
   std::vector<vm::polygon3f> portals;
   std::filesystem::path path;
+};
+
+struct DahSceneInfo
+{
+  std::filesystem::path path;
+  std::string profileId;
+  std::string mapName;
+  vm::bbox3d bounds;
+  std::uint64_t placementCount = 0;
+  std::uint64_t lodCount = 0;
+  std::uint64_t geometryCount = 0;
+  std::uint64_t nativeTriangleCount = 0;
+  std::uint64_t displayedLod = 0;
 };
 
 class MapDocument
@@ -162,6 +177,8 @@ private:
   std::optional<PortalFile> m_portalFile;
 
   std::unique_ptr<render::MapRenderer> m_mapRenderer;
+  std::optional<DahSceneInfo> m_dahSceneInfo;
+  std::unique_ptr<render::DirectRenderable> m_dahSceneRenderer;
 
   NotifierConnection m_notifierConnection;
 
@@ -219,6 +236,12 @@ public: // accessors and such
 
   render::MapRenderer& mapRenderer();
   const render::MapRenderer& mapRenderer() const;
+
+  void setDahSceneReference(
+    DahSceneInfo info, std::unique_ptr<render::DirectRenderable> renderer);
+  const DahSceneInfo* dahSceneInfo() const;
+  render::DirectRenderable* dahSceneRenderer() const;
+  bool isDahScene() const;
 
   Logger& logger();
   void setTargetLogger(Logger* parentLogger);

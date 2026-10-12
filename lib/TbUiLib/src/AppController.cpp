@@ -39,11 +39,14 @@
 #include "gl/VboManager.h"
 #include "mdl/EnvironmentConfig.h"
 #include "mdl/GameManager.h"
+#include "mdl/MapFormat.h"
 #include "mdl/MapHeader.h"
 #include "prefs/Preferences.h"
 #include "ui/AboutDialog.h"
 #include "ui/ActionManager.h"
 #include "ui/CrashDialog.h"
+#include "ui/DahSceneManifest.h"
+#include "ui/DahSceneReference.h"
 #include "ui/FileDialogDefaultDir.h"
 #include "ui/GameDialog.h"
 #include "ui/GlFunctions.h"
@@ -73,12 +76,28 @@
 #include <fmt/ostream.h>
 #include <fmt/std.h>
 
+#include <algorithm>
 #include <chrono>
+#include <variant>
 
 namespace tb::ui
 {
 namespace
 {
+
+std::optional<std::filesystem::path> dahSceneDirectoryForPath(
+  const std::filesystem::path& path)
+{
+  if (path.extension() == ".dahscene")
+  {
+    return path;
+  }
+  if (path.filename() == "scene.json" && path.parent_path().extension() == ".dahscene")
+  {
+    return path.parent_path();
+  }
+  return std::nullopt;
+}
 
 auto createEnvironmentConfig()
 {
@@ -132,6 +151,12 @@ auto createRecentDocuments(QObject* parent)
 {
   auto checkRecentDocument = [](const auto& path) {
     auto ec = std::error_code{};
+    if (const auto sceneDirectory = dahSceneDirectoryForPath(path))
+    {
+      return std::filesystem::is_directory(*sceneDirectory, ec) && !ec
+             && std::filesystem::is_regular_file(*sceneDirectory / "scene.json", ec)
+             && !ec;
+    }
     return std::filesystem::is_regular_file(path, ec) && !ec;
   };
 
@@ -326,7 +351,7 @@ void AppController::openDocument()
     nullptr,
     tr("Open Map"),
     fileDialogDefaultDirectory(FileDialogDir::Map),
-    "Map files (*.map);;Any files (*.*)");
+    "DAH editor scenes (scene.json);;Map files (*.map);;Any files (*.*)");
 
   if (const auto path = pathFromQString(pathStr); !path.empty())
   {
@@ -341,11 +366,16 @@ bool AppController::openDocument(const std::filesystem::path& path)
   auto ec = std::error_code{};
   auto absPath =
     path.is_absolute() ? path : std::filesystem::absolute(path, ec).lexically_normal();
+  const auto sceneDirectory = dahSceneDirectoryForPath(absPath);
 
   const auto checkFileExists = [&]() {
-    return fs::Disk::pathInfo(absPath) == fs::PathInfo::File
-             ? Result<void>{}
-             : Result<void>{Error{fmt::format("{} not found", path)}};
+    const auto exists =
+      sceneDirectory
+        ? std::filesystem::is_directory(*sceneDirectory, ec) && !ec
+            && std::filesystem::is_regular_file(*sceneDirectory / "scene.json", ec) && !ec
+        : fs::Disk::pathInfo(absPath) == fs::PathInfo::File;
+    return exists ? Result<void>{}
+                  : Result<void>{Error{fmt::format("{} not found", path)}};
   };
 
   return checkFileExists() | kdl::or_else([&](const auto& e) {
@@ -353,6 +383,61 @@ bool AppController::openDocument(const std::filesystem::path& path)
            return Result<void>{e};
          })
          | kdl::and_then([&]() {
+             if (sceneDirectory)
+             {
+               auto manifestResult = loadDahSceneManifest(*sceneDirectory);
+               if (std::holds_alternative<DahSceneLoadError>(manifestResult))
+               {
+                 return Result<bool>{Error{fmt::format(
+                   "Could not open DAH editor scene: {}",
+                   std::get<DahSceneLoadError>(manifestResult).message)}};
+               }
+               auto manifest = std::get<DahSceneManifest>(std::move(manifestResult));
+
+               auto referenceResult = buildDahSceneReference(manifest, 0);
+               if (std::holds_alternative<DahSceneLoadError>(referenceResult))
+               {
+                 return Result<bool>{Error{fmt::format(
+                   "Could not build DAH terrain reference: {}",
+                   std::get<DahSceneLoadError>(referenceResult).message)}};
+               }
+               auto reference = std::get<DahSceneReference>(std::move(referenceResult));
+               const auto* gameInfo = gameManager().gameInfo("Generic");
+               if (gameInfo == nullptr)
+               {
+                 return Result<bool>{Error{"Generic game configuration is unavailable"}};
+               }
+
+               const auto size = reference.bounds.size();
+               const auto margin =
+                 std::max({1024.0, size.x() * 0.05, size.y() * 0.05, size.z() * 0.05});
+               const auto worldBounds = reference.bounds.expand(margin);
+               const auto info = DahSceneInfo{
+                 *sceneDirectory,
+                 manifest.profileId,
+                 manifest.mapName,
+                 reference.bounds,
+                 manifest.counts.placements,
+                 manifest.counts.lods,
+                 manifest.counts.geometries,
+                 reference.nativeTriangleCount,
+                 reference.lodIndex};
+               auto renderer =
+                 std::make_shared<std::unique_ptr<render::DirectRenderable>>(
+                   createDahSceneReferenceRenderer(std::move(reference)));
+
+               return m_mapWindowManager->createDocument(
+                        *gameInfo, mdl::MapFormat::Valve, worldBounds)
+                      | kdl::transform([&, info, renderer]() {
+                          auto* mapWindow = m_mapWindowManager->topMapWindow();
+                          contract_assert(mapWindow != nullptr);
+                          mapWindow->document().setDahSceneReference(
+                            info, std::move(*renderer));
+                          m_welcomeWindow->close();
+                          return true;
+                        });
+             }
+
              const auto gameNameAndMapFormat = detectOrQueryGameAndFormat(*this, absPath);
              if (!gameNameAndMapFormat)
              {

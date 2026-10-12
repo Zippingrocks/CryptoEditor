@@ -23,9 +23,13 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QtEndian>
 
 #include "ui/CatchConfig.h"
 #include "ui/DahSceneManifest.h"
+#include "ui/DahSceneReference.h"
+
+#include <bit>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -46,13 +50,34 @@ void writeFile(const QString& path, const QByteArray& contents)
   REQUIRE(file.write(contents) == contents.size());
 }
 
-QJsonObject bufferView(const QByteArray& buffer)
+QJsonObject bufferView(
+  const QByteArray& completeBuffer, const int offset, const int length)
 {
+  const auto payload = completeBuffer.mid(offset, length);
   return {
-    {"offset", 0},
-    {"length", buffer.size()},
-    {"sha256", hash(buffer)},
+    {"offset", offset},
+    {"length", length},
+    {"sha256", hash(payload)},
   };
+}
+
+void appendU32(QByteArray& buffer, const std::uint32_t value)
+{
+  const auto littleEndian = qToLittleEndian(value);
+  buffer.append(reinterpret_cast<const char*>(&littleEndian), sizeof(littleEndian));
+}
+
+void appendF32(QByteArray& buffer, const float value)
+{
+  appendU32(buffer, std::bit_cast<std::uint32_t>(value));
+}
+
+void appendVertex(QByteArray& buffer, const float x, const float y, const float z)
+{
+  appendF32(buffer, x);
+  appendF32(buffer, y);
+  appendF32(buffer, z);
+  buffer.append(QByteArray{12, '\0'});
 }
 
 void writeTestScene(
@@ -61,12 +86,21 @@ void writeTestScene(
   const bool badBufferHash = false,
   const QString& bufferPath = "buffers.bin")
 {
-  const auto buffer = QByteArray{"native-bytes"};
+  auto buffer = QByteArray{};
+  appendVertex(buffer, 0.0f, 0.0f, 0.0f);
+  appendVertex(buffer, 1.0f, 0.0f, 0.0f);
+  appendVertex(buffer, 0.0f, 1.0f, 0.0f);
+  const auto triangleOffset = buffer.size();
+  appendU32(buffer, 0);
+  appendU32(buffer, 1);
+  appendU32(buffer, 2);
   if (bufferPath == "buffers.bin")
   {
     writeFile(root + "/buffers.bin", buffer);
   }
-  const auto view = bufferView(buffer);
+  const auto vertices = bufferView(buffer, 0, triangleOffset);
+  const auto triangles = bufferView(buffer, triangleOffset, 12);
+  const auto empty = bufferView(buffer, buffer.size(), 0);
   auto matrix = QJsonArray{};
   for (auto i = 0; i < 16; ++i)
   {
@@ -99,10 +133,10 @@ void writeTestScene(
        {"counts", QJsonObject{{"vertices", 3}, {"triangles", 1}}},
        {"buffers",
         QJsonObject{
-          {"vertices", view},
-          {"index_strip", view},
-          {"triangles", view},
-          {"segments", view}}}}}},
+          {"vertices", vertices},
+          {"index_strip", empty},
+          {"triangles", triangles},
+          {"segments", empty}}}}}},
     {"materials", QJsonArray{}},
     {"textures", QJsonArray{}},
     {"placements",
@@ -135,6 +169,25 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(scene.geometries.size() == 1);
     CHECK(scene.placements.size() == 1);
     CHECK(scene.placements.front().lods.front().geometryId == "geometry:test");
+  }
+
+  SECTION("builds a placed native triangle reference")
+  {
+    auto directory = QTemporaryDir{};
+    REQUIRE(directory.isValid());
+    writeTestScene(directory.path());
+    const auto manifestResult = loadDahSceneManifest(directory.path().toStdWString());
+    REQUIRE(std::holds_alternative<DahSceneManifest>(manifestResult));
+
+    const auto referenceResult =
+      buildDahSceneReference(std::get<DahSceneManifest>(manifestResult), 0);
+    REQUIRE(std::holds_alternative<DahSceneReference>(referenceResult));
+    const auto& reference = std::get<DahSceneReference>(referenceResult);
+    CHECK(reference.placementCount == 1);
+    CHECK(reference.nativeTriangleCount == 1);
+    CHECK(reference.vertices.size() == 3);
+    CHECK(reference.bounds.min == vm::vec3d{0.0, 0.0, 0.0});
+    CHECK(reference.bounds.max == vm::vec3d{1.0, 1.0, 0.0});
   }
 
   SECTION("rejects unsupported schemas")
@@ -183,6 +236,13 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(scene.materialIds.size() == 91);
       CHECK(scene.textures.size() == 67);
       CHECK(scene.placements.size() == 92);
+
+      const auto referenceResult = buildDahSceneReference(scene, 0);
+      REQUIRE(std::holds_alternative<DahSceneReference>(referenceResult));
+      const auto& reference = std::get<DahSceneReference>(referenceResult);
+      CHECK(reference.placementCount == 92);
+      CHECK(reference.nativeTriangleCount == 103634);
+      CHECK(reference.vertices.size() == 310902);
     }
   }
 }

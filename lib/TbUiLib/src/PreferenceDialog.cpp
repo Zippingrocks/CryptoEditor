@@ -33,7 +33,6 @@
 #include "base/PreferenceManager.h"
 #include "ui/ImageUtils.h"
 #include "ui/QStyleUtils.h"
-#include "ui/UpdatePreferencePane.h"
 #if !defined(Q_OS_MACOS)
 #include "ui/BorderLine.h"
 #endif
@@ -66,8 +65,7 @@ enum class PreferenceDialog::PrefPane
   Colors = 2,
   Mouse = 3,
   Keyboard = 4,
-  Update = 5,
-  Last = 5
+  Last = 4
 } PrefPane;
 
 
@@ -142,7 +140,6 @@ void PreferenceDialog::createGui()
   const auto colorsImage = loadSVGIcon("ColorPreferences.svg");
   const auto mouseImage = loadSVGIcon("MousePreferences.svg");
   const auto keyboardImage = loadSVGIcon("KeyboardPreferences.svg");
-  const auto updateImage = loadSVGIcon("UpdatePreferences.svg");
 
   m_toolBar = new QToolBar{};
   m_toolBar->setFloatable(false);
@@ -154,7 +151,6 @@ void PreferenceDialog::createGui()
   m_toolBar->addAction(mouseImage, "Mouse", [&]() { switchToPane(PrefPane::Mouse); });
   m_toolBar->addAction(
     keyboardImage, "Keyboard", [&]() { switchToPane(PrefPane::Keyboard); });
-  m_toolBar->addAction(updateImage, "Update", [&]() { switchToPane(PrefPane::Update); });
 
   // Don't display tooltips for pane switcher buttons...
   for (auto* button : m_toolBar->findChildren<QToolButton*>())
@@ -168,7 +164,6 @@ void PreferenceDialog::createGui()
   m_stackedWidget->addWidget(new ColorsPreferencePane{});
   m_stackedWidget->addWidget(new MousePreferencePane{});
   m_stackedWidget->addWidget(new KeyboardPreferencePane{m_appController, m_document});
-  m_stackedWidget->addWidget(new UpdatePreferencePane{m_appController});
 
   m_buttonBox = new QDialogButtonBox{
     PreferenceManager::instance().saveInstantly()

@@ -848,7 +848,9 @@ void ActionManager::createFileMenu()
     ActionContext::Any,
     standardShortcut(StandardShortcut::Save),
     [](auto& context) { context.mapWindow().saveDocument(); },
-    [](const auto& context) { return context.hasDocument(); },
+    [](const auto& context) {
+      return context.hasDocument() && !context.mapWindow().documentReadOnly();
+    },
   }));
   fileMenu.addItem(addAction(Action{
     "Menu/File/Save as...",
@@ -856,7 +858,9 @@ void ActionManager::createFileMenu()
     ActionContext::Any,
     standardShortcut(StandardShortcut::SaveAs),
     [](auto& context) { context.mapWindow().saveDocumentAs(); },
-    [](const auto& context) { return context.hasDocument(); },
+    [](const auto& context) {
+      return context.hasDocument() && !context.mapWindow().documentReadOnly();
+    },
   }));
 
   auto& exportMenu = fileMenu.addMenu("Export");
@@ -866,7 +870,9 @@ void ActionManager::createFileMenu()
     ActionContext::Any,
     KeySequence{},
     [](auto& context) { context.mapWindow().exportDocumentAsObj(); },
-    [](const auto& context) { return context.hasDocument(); },
+    [](const auto& context) {
+      return context.hasDocument() && !context.mapWindow().documentReadOnly();
+    },
   }));
   exportMenu.addItem(addAction(Action{
     "Menu/File/Export/Map...",
@@ -874,7 +880,9 @@ void ActionManager::createFileMenu()
     ActionContext::Any,
     KeySequence{},
     [](auto& context) { context.mapWindow().exportDocumentAsMap(); },
-    [](const auto& context) { return context.hasDocument(); },
+    [](const auto& context) {
+      return context.hasDocument() && !context.mapWindow().documentReadOnly();
+    },
     std::nullopt,
     std::nullopt,
     "Exports the current map to a .map file. Layers marked Omit From Export "
@@ -968,7 +976,9 @@ void ActionManager::createFileMenu()
     ActionContext::Any,
     KeySequence{},
     [](auto& context) { context.mapWindow().revertDocument(); },
-    [](const auto& context) { return context.hasDocument(); },
+    [](const auto& context) {
+      return context.hasDocument() && !context.mapWindow().documentReadOnly();
+    },
     std::nullopt,
     std::nullopt,
     "Discards any unsaved changes and reloads the map file.",
@@ -2044,8 +2054,8 @@ void ActionManager::createHelpMenu()
     [](const auto&) { return true; },
   }));
   helpMenu.addItem(addAction(Action{
-    "Menu/File/About TrenchBroom",
-    "About TrenchBroom",
+    "Menu/File/About CryptoEditor",
+    "About CryptoEditor",
     ActionContext::Any,
     KeySequence{},
     [](auto& context) { context.appController().showAboutDialog(); },
