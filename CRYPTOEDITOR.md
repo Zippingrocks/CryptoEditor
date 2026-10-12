@@ -50,11 +50,11 @@ reference document, decodes both native terrain LODs, applies all 92 placement
 matrices, frames the terrain in the 3D viewport, and exposes locked LOD0 and
 LOD1 display layers alongside an ordinary editor-geometry layer. The Layers
 panel's eye controls switch either native LOD on or off; LOD0 is initially shown
-and LOD1 is initially hidden. The renderer consumes the preserved candidate UV
-channel, exact segment-to-material assignments, and hash-verified decoded PNG
-previews for every material used by Area 42's two terrain LODs. This is labeled
-as a candidate preview: UV semantics, texture addressing, render state, and the
-high segment-flag byte still require retail-code and in-game confirmation.
+and LOD1 is initially hidden. The renderer consumes the executable-verified UV
+channel, exact segment-to-material assignments, hash-verified decoded PNG
+previews, and verified per-axis wrap/clamp modes for every material used by Area
+42's two terrain LODs. Viewport orientation, remaining render states, and the
+high segment-flag byte still require matching in-game confirmation.
 Native save, autosave, revert, and misleading map/OBJ exports are disabled for
 this document type. A converted heightmap or Battlefront `.wld`/`.ter` file must
 never become the authoritative representation of a DAH map.
@@ -64,12 +64,11 @@ never become the authoritative representation of a DAH map.
 1. Keep the upstream editor building and tested on Windows.
 2. **Complete:** connect the verified `.dahscene` loader to a read-only DAH
    document-open path and render all 92 native terrain placements at both LODs.
-3. **Complete for the read-only preview:** add candidate UVs, exact material
-   batches, and hash-verified decoded textures while labeling unresolved visual
-   semantics explicitly.
-4. **Next:** confirm UV semantics, addressing, and render state against the
-   retail executable and matching in-game locations; then add terrain selection
-   and inspection without changing package data.
+3. **Complete for the read-only preview:** add executable-verified UVs, exact
+   material batches, hash-verified decoded textures, and native U/V wrap/clamp.
+4. **Next:** compare representative terrain against matching in-game locations,
+   resolve remaining visual differences, then add terrain selection and
+   inspection without changing package data.
 5. Add brush-to-native geometry workflows alongside native terrain editing.
 6. Prove byte-preserving unchanged serialization.
 7. Prove one controlled object move on a disposable game copy.

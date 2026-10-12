@@ -77,8 +77,16 @@ struct DahSceneTexture
 
 struct DahSceneMaterial
 {
+  enum class AddressMode
+  {
+    Repeat,
+    ClampToEdge,
+  };
+
   std::string id;
   std::optional<std::string> textureId;
+  AddressMode addressU = AddressMode::Repeat;
+  AddressMode addressV = AddressMode::Repeat;
 };
 
 struct DahSceneCounts

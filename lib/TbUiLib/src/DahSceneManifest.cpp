@@ -68,6 +68,21 @@ std::string stringField(const QJsonObject& object, const char* key)
   return value.toString().toStdString();
 }
 
+DahSceneMaterial::AddressMode addressModeField(
+  const QJsonObject& object, const char* key)
+{
+  const auto value = stringField(object, key);
+  if (value == "wrap")
+  {
+    return DahSceneMaterial::AddressMode::Repeat;
+  }
+  if (value == "clamp")
+  {
+    return DahSceneMaterial::AddressMode::ClampToEdge;
+  }
+  throw JsonError{std::string{"Unsupported texture address mode: "} + value};
+}
+
 std::uint64_t unsignedField(const QJsonObject& object, const char* key)
 {
   const auto value = object.value(key);
@@ -243,7 +258,8 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
         || stringField(positionLayout, "status") != "verified"
         || unsignedField(uvLayout, "offset") != 12
         || stringField(uvLayout, "format") != "float32x2-little-endian"
-        || stringField(uvLayout, "status") != "candidate")
+        || (stringField(uvLayout, "status") != "candidate"
+            && stringField(uvLayout, "status") != "verified"))
       {
         throw JsonError{"Unsupported DAH terrain vertex layout"};
       }
@@ -299,6 +315,21 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
       else if (!binding.isNull())
       {
         throw JsonError{"Scene material binding must be an object or null"};
+      }
+      const auto sampler = materialJson.value("sampler");
+      if (sampler.isObject())
+      {
+        const auto samplerObject = sampler.toObject();
+        if (stringField(samplerObject, "status") != "verified")
+        {
+          throw JsonError{"Scene material sampler must be verified"};
+        }
+        material.addressU = addressModeField(samplerObject, "address_u");
+        material.addressV = addressModeField(samplerObject, "address_v");
+      }
+      else if (!sampler.isUndefined() && !sampler.isNull())
+      {
+        throw JsonError{"Scene material sampler must be an object"};
       }
       result.materials.push_back(std::move(material));
     }

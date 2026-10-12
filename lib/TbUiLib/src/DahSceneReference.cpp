@@ -143,14 +143,20 @@ struct RenderBatch
   gl::VertexArray vertexArray;
   std::unique_ptr<gl::Material> material;
   Color fallback;
+  DahSceneMaterial::AddressMode addressU;
+  DahSceneMaterial::AddressMode addressV;
 
   RenderBatch(
     std::vector<DahSceneReferenceBatch::Vertex> vertices,
     std::string materialId,
-    std::shared_ptr<gl::TextureResource> textureResource)
+    std::shared_ptr<gl::TextureResource> textureResource,
+    const DahSceneMaterial::AddressMode addressU,
+    const DahSceneMaterial::AddressMode addressV)
     : vertexArray{gl::VertexArray::move(std::move(vertices))}
     , material{textureResource ? std::make_unique<gl::Material>(materialId, std::move(textureResource)) : nullptr}
     , fallback{fallbackColor(materialId)}
+    , addressU{addressU}
+    , addressV{addressV}
   {
   }
 };
@@ -180,7 +186,11 @@ public:
         textureResource = it->second;
       }
       m_batches.emplace_back(
-        std::move(batch.vertices), std::move(batch.materialId), textureResource);
+        std::move(batch.vertices),
+        std::move(batch.materialId),
+        textureResource,
+        batch.addressU,
+        batch.addressV);
     }
   }
 
@@ -232,6 +242,18 @@ public:
       if (applyMaterial)
       {
         batch.material->activate(gl, context.minFilterMode(), context.magFilterMode());
+        gl.texParameteri(
+          GL_TEXTURE_2D,
+          GL_TEXTURE_WRAP_S,
+          batch.addressU == DahSceneMaterial::AddressMode::ClampToEdge
+            ? GL_CLAMP_TO_EDGE
+            : GL_REPEAT);
+        gl.texParameteri(
+          GL_TEXTURE_2D,
+          GL_TEXTURE_WRAP_T,
+          batch.addressV == DahSceneMaterial::AddressMode::ClampToEdge
+            ? GL_CLAMP_TO_EDGE
+            : GL_REPEAT);
       }
       if (batch.vertexArray.setup(gl, shader.program()))
       {
@@ -370,8 +392,12 @@ DahSceneReferenceResult buildDahSceneReference(
             texturePreviewPath = textureIt->second;
             ++result.texturedMaterialCount;
           }
-          result.batches.push_back(
-            DahSceneReferenceBatch{materialId, texturePreviewPath, {}});
+          result.batches.push_back(DahSceneReferenceBatch{
+            materialId,
+            texturePreviewPath,
+            materialIt->second->addressU,
+            materialIt->second->addressV,
+            {}});
         }
         auto& batch = result.batches[batchIt->second];
 

@@ -47,6 +47,8 @@ struct DahSceneReferenceBatch
 
   std::string materialId;
   std::optional<std::filesystem::path> texturePreviewPath;
+  DahSceneMaterial::AddressMode addressU = DahSceneMaterial::AddressMode::Repeat;
+  DahSceneMaterial::AddressMode addressV = DahSceneMaterial::AddressMode::Repeat;
   std::vector<Vertex> vertices;
 };
 

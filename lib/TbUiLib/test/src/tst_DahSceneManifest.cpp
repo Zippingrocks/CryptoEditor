@@ -153,7 +153,7 @@ void writeTestScene(
            QJsonObject{
              {"offset", 12},
              {"format", "float32x2-little-endian"},
-             {"status", "candidate"}}}}},
+             {"status", "verified"}}}}},
        {"buffers",
         QJsonObject{
           {"vertices", vertices},
@@ -164,7 +164,13 @@ void writeTestScene(
         QJsonArray{QJsonObject{{"triangle_count", 1}, {"material_slot", 0}}}}}}},
     {"materials",
      QJsonArray{QJsonObject{
-       {"id", "material:test"}, {"binding", QJsonObject{{"texture", "texture:test"}}}}}},
+       {"id", "material:test"},
+       {"binding", QJsonObject{{"texture", "texture:test"}}},
+       {"sampler",
+        QJsonObject{
+          {"address_u", "clamp"},
+          {"address_v", "wrap"},
+          {"status", "verified"}}}}}},
     {"textures",
      QJsonArray{QJsonObject{
        {"id", "texture:test"},
@@ -199,6 +205,10 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(scene.geometries.size() == 1);
     CHECK(scene.placements.size() == 1);
     CHECK(scene.placements.front().lods.front().geometryId == "geometry:test");
+    CHECK(
+      scene.materials.front().addressU
+      == DahSceneMaterial::AddressMode::ClampToEdge);
+    CHECK(scene.materials.front().addressV == DahSceneMaterial::AddressMode::Repeat);
   }
 
   SECTION("builds a placed native triangle reference")
@@ -220,6 +230,11 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(reference.texturedMaterialCount == 1);
     CHECK(reference.batches.front().materialId == "material:test");
     CHECK(reference.batches.front().texturePreviewPath.has_value());
+    CHECK(
+      reference.batches.front().addressU
+      == DahSceneMaterial::AddressMode::ClampToEdge);
+    CHECK(
+      reference.batches.front().addressV == DahSceneMaterial::AddressMode::Repeat);
     CHECK(reference.bounds.min == vm::vec3d{0.0, 0.0, 0.0});
     CHECK(reference.bounds.max == vm::vec3d{1.0, 1.0, 0.0});
   }
