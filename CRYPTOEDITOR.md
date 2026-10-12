@@ -41,16 +41,20 @@ resource identities, relocations, loadgroups, native meshes and both LODs,
 materials, textures, unknown fields, validation, and—only after round-trip
 gates pass—package writing.
 
-The boundary between them will be a versioned scene/document API. A converted
-heightmap or Battlefront `.wld`/`.ter` file must never become the authoritative
-representation of a DAH map.
+The first boundary is the versioned, read-only `.dahscene` v1 directory emitted
+by `dahdev`. CryptoEditor now has a strict manifest loader that verifies the
+schema, read-only marker, package and buffer-view hashes, path containment,
+geometry references, collection counts, and Area 42's exact native geometry
+counts before accepting a scene. A converted heightmap or Battlefront
+`.wld`/`.ter` file must never become the authoritative representation of a DAH
+map.
 
 ## Delivery sequence
 
 1. Keep the upstream editor building and tested on Windows.
-2. Add a read-only DAH game configuration and open Area 42 through a narrow
-   adapter backed by the native reader.
-3. Render the verified 92 terrain placements, both native LODs, original UVs,
+2. **In progress:** connect the verified `.dahscene` loader to a read-only DAH
+   game configuration and document-open path.
+3. Render the verified 92 terrain placements, both native LODs, candidate UVs,
    materials, and textures; report unresolved dependencies explicitly.
 4. Add terrain selection and inspection without changing package data.
 5. Add brush-to-native geometry workflows alongside native terrain editing.
