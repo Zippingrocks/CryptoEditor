@@ -40,6 +40,8 @@ struct DahSceneBufferView
 struct DahSceneGeometry
 {
   std::string id;
+  std::string kind;
+  std::uint64_t vertexStride = 0;
   std::uint64_t vertexCount = 0;
   std::uint64_t triangleCount = 0;
   DahSceneBufferView vertices;
@@ -64,6 +66,9 @@ struct DahSceneLod
 struct DahScenePlacement
 {
   std::string id;
+  std::string editorCollection;
+  std::string nativeClass;
+  std::string assetName;
   std::array<double, 16> matrix{};
   std::vector<DahSceneLod> lods;
 };
@@ -91,8 +96,14 @@ struct DahSceneMaterial
 
 struct DahSceneCounts
 {
-  std::uint64_t placements = 0;
-  std::uint64_t lods = 0;
+  std::uint64_t terrainPlacements = 0;
+  std::uint64_t terrainLods = 0;
+  std::uint64_t terrainGeometries = 0;
+  std::uint64_t worldBuckets = 0;
+  std::uint64_t worldPlacements = 0;
+  std::uint64_t buildingPlacements = 0;
+  std::uint64_t buildingRenderablePlacements = 0;
+  std::uint64_t buildingGeometries = 0;
   std::uint64_t geometries = 0;
   std::uint64_t materials = 0;
   std::uint64_t textures = 0;
@@ -115,6 +126,7 @@ struct DahSceneManifest
   std::vector<DahSceneMaterial> materials;
   std::vector<DahSceneTexture> textures;
   std::vector<DahScenePlacement> placements;
+  std::vector<DahScenePlacement> objectPlacements;
 };
 
 struct DahSceneLoadError

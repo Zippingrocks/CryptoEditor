@@ -1,0 +1,25 @@
+#version 120
+
+/*
+ Copyright (C) 2026 CryptoEditor contributors
+
+ This file is part of CryptoEditor and is licensed under GPLv3 or later.
+ */
+
+uniform vec4 Color;
+uniform vec3 CameraPosition;
+
+varying vec4 modelCoordinates;
+varying vec3 modelNormal;
+varying vec4 faceColor;
+varying vec3 viewVector;
+
+void main(void)
+{
+  gl_Position = gl_ProjectionMatrix * gl_ModelViewMatrix * gl_Vertex;
+  gl_TexCoord[0] = gl_MultiTexCoord0;
+  modelCoordinates = gl_Vertex;
+  modelNormal = gl_Normal;
+  faceColor = Color * gl_Color;
+  viewVector = CameraPosition - gl_Vertex.xyz;
+}

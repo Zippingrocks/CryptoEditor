@@ -41,20 +41,29 @@ resource identities, relocations, loadgroups, native meshes and both LODs,
 materials, textures, unknown fields, validation, and—only after round-trip
 gates pass—package writing.
 
-The first boundary is the versioned, read-only `.dahscene` v1 directory emitted
+The first boundary is the versioned, read-only `.dahscene` v2 directory emitted
 by `dahdev`. CryptoEditor has a strict manifest loader that verifies the
 schema, read-only marker, package and buffer-view hashes, path containment,
 geometry references, collection counts, and Area 42's exact native geometry
-counts before accepting a scene. It opens an accepted scene as a read-only DAH
-reference document, decodes both native terrain LODs, applies all 92 placement
-matrices, frames the terrain in the 3D viewport, and exposes locked LOD0 and
-LOD1 display layers alongside an ordinary editor-geometry layer. The Layers
+counts before accepting a scene. In addition to both native terrain LODs, v2
+preserves all 41 world-instance buckets and 849 placement records. It currently
+resolves the placement/archetype/LOD/static-mesh chain for 17 of Area 42's 18
+building placements; the guard tower's segmented visual remains represented but
+is explicitly unresolved. The editor displays those buildings at their retail
+transforms rather than presenting them as an unplaced model catalog.
+
+CryptoEditor frames the combined terrain and building reference in the 3D
+viewport and exposes locked LOD0 and LOD1 display layers alongside an ordinary
+editor-geometry layer. The Layers
 panel's eye controls switch either native LOD on or off; LOD0 is initially shown
 and LOD1 is initially hidden. The renderer consumes the executable-verified UV
 channel, exact segment-to-material assignments, hash-verified decoded PNG
 previews, and verified per-axis wrap/clamp modes for every material used by Area
-42's two terrain LODs. Viewport orientation, remaining render states, and the
-high segment-flag byte still require matching in-game confirmation.
+42's two terrain LODs. The pinned retail executable also proves the terrain
+stream's final four bytes are `D3DCOLOR`; the viewport applies native RGB vertex
+modulation while leaving alpha/blending disabled until its render-state meaning
+is established. Viewport orientation, remaining render states, and the high
+segment-flag byte still require matching in-game confirmation.
 Native save, autosave, revert, and misleading map/OBJ exports are disabled for
 this document type. A converted heightmap or Battlefront `.wld`/`.ter` file must
 never become the authoritative representation of a DAH map.
@@ -65,9 +74,11 @@ industrial/agricultural, military/government, infrastructure, and modular
 structures from Furon architecture. Neighboring World, Props, Actors, Gameplay,
 and Systems tabs keep terrain, set dressing, spawns, mission logic, collision,
 destruction, streaming, effects, audio, and preserved unknown records from being
-flattened into one asset list. The catalog is searchable and deliberately does
-not invent retail asset identities; building placement remains disabled until
-the native scenery reader supplies verified resources and dependencies. See
+flattened into one asset list. The Buildings tab now enumerates the actual Area
+42 building placements, grouped by their native asset names with positions,
+render status, and preserved record identity. It deliberately does not invent
+assets that are absent from the retail map. Native placement editing remains
+disabled until the unchanged-save gate supplies a verified writer. See
 [`DAH_MAP_ELEMENTS.md`](DAH_MAP_ELEMENTS.md).
 
 ## Delivery sequence
@@ -76,14 +87,19 @@ the native scenery reader supplies verified resources and dependencies. See
 2. **Complete:** connect the verified `.dahscene` loader to a read-only DAH
    document-open path and render all 92 native terrain placements at both LODs.
 3. **Complete for the read-only preview:** add executable-verified UVs, exact
-   material batches, hash-verified decoded textures, and native U/V wrap/clamp.
-4. **Next:** compare representative terrain against matching in-game locations,
+   material batches, hash-verified decoded textures, native U/V wrap/clamp, and
+   native terrain RGB vertex modulation.
+4. **Complete for Area 42 buildings:** preserve all native world placements and
+   render 17 verified building placements through their native resource chain.
+5. **Next:** compare representative terrain against matching in-game locations,
    resolve remaining visual differences, then add terrain selection and
    inspection without changing package data.
-5. Add brush-to-native geometry workflows alongside native terrain editing.
-6. Prove byte-preserving unchanged serialization.
-7. Prove one controlled object move on a disposable game copy.
-8. Expand to collision, destruction, missions, streaming, and new-map creation.
+6. Resolve segmented/destructible visuals and the other native object mesh
+   families, then connect scene selection to preserved object records.
+7. Add brush-to-native geometry workflows alongside native terrain editing.
+8. Prove byte-preserving unchanged serialization.
+9. Prove one controlled object move on a disposable game copy.
+10. Expand to collision, destruction, missions, streaming, and new-map creation.
 
 ## Scene organization
 

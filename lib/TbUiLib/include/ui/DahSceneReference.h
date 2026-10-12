@@ -43,7 +43,7 @@ namespace tb::ui
 
 struct DahSceneReferenceBatch
 {
-  using Vertex = gl::VertexTypes::P3NT2::Vertex;
+  using Vertex = gl::VertexTypes::P3NT2C4::Vertex;
 
   std::string materialId;
   std::optional<std::filesystem::path> texturePreviewPath;

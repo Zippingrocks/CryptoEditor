@@ -80,6 +80,18 @@ float readF32(const QByteArray& buffer, const std::uint64_t offset)
   return std::bit_cast<float>(readU32(buffer, offset));
 }
 
+std::int16_t readI16(const QByteArray& buffer, const std::uint64_t offset)
+{
+  if (
+    offset > static_cast<std::uint64_t>(buffer.size())
+    || sizeof(std::int16_t) > static_cast<std::uint64_t>(buffer.size()) - offset)
+  {
+    throw std::runtime_error{"DAH scene numeric read is out of range"};
+  }
+  return qFromLittleEndian<std::int16_t>(
+    reinterpret_cast<const unsigned char*>(buffer.constData() + offset));
+}
+
 vm::vec3f transformPosition(
   const vm::vec3f& position, const std::array<double, 16>& matrix)
 {
@@ -93,6 +105,32 @@ vm::vec3f transformPosition(
     static_cast<float>(
       position.x() * matrix[2] + position.y() * matrix[6] + position.z() * matrix[10]
       + matrix[14])};
+}
+
+vm::vec3f transformNormal(const vm::vec3f& normal, const std::array<double, 16>& matrix)
+{
+  auto transformed = vm::vec3f{
+    static_cast<float>(
+      normal.x() * matrix[0] + normal.y() * matrix[4] + normal.z() * matrix[8]),
+    static_cast<float>(
+      normal.x() * matrix[1] + normal.y() * matrix[5] + normal.z() * matrix[9]),
+    static_cast<float>(
+      normal.x() * matrix[2] + normal.y() * matrix[6] + normal.z() * matrix[10])};
+  const auto length = vm::length(transformed);
+  return length > 0.000001f ? transformed / length : vm::vec3f{0.0f, 0.0f, 1.0f};
+}
+
+vm::vec4f terrainDiffuseColor(const QByteArray& buffer, const std::uint64_t offset)
+{
+  const auto value = readU32(buffer, offset);
+  constexpr auto Scale = 1.0f / 255.0f;
+  // Native D3DCOLOR is a 0xAARRGGBB dword. Alpha is preserved in the interchange,
+  // but is not opacity here until the remaining retail blend state is decoded.
+  return vm::vec4f{
+    static_cast<float>((value >> 16u) & 0xffu) * Scale,
+    static_cast<float>((value >> 8u) & 0xffu) * Scale,
+    static_cast<float>(value & 0xffu) * Scale,
+    1.0f};
 }
 
 vm::vec3f faceNormal(const vm::vec3f& a, const vm::vec3f& b, const vm::vec3f& c)
@@ -205,7 +243,8 @@ public:
   void render(render::RenderContext& context) override
   {
     auto& gl = context.gl();
-    auto shader = gl::ActiveShader{gl, context.shaderManager(), gl::Shaders::FaceShader};
+    auto shader =
+      gl::ActiveShader{gl, context.shaderManager(), gl::Shaders::DahReferenceShader};
     auto& prefs = PreferenceManager::instance();
 
     gl.disable(GL_CULL_FACE);
@@ -218,6 +257,7 @@ public:
     shader.set("GridAlpha", prefs.get(Preferences::GridAlpha));
     shader.set("Material", 0);
     shader.set("ApplyTinting", false);
+    shader.set("ApplyVertexColor", true);
     shader.set("GrayScale", false);
     shader.set("CameraPosition", context.camera().position());
     shader.set("ShadeFaces", context.shadeFaces());
@@ -238,22 +278,21 @@ public:
       const auto* texture = gl::getTexture(batch.material.get());
       const auto applyMaterial = context.showMaterials() && texture != nullptr;
       shader.set("ApplyMaterial", applyMaterial);
-      shader.set("Color", texture ? texture->averageColor() : batch.fallback);
+      shader.set(
+        "Color", applyMaterial ? Color{RgbaF{1.0f, 1.0f, 1.0f, 1.0f}} : batch.fallback);
       if (applyMaterial)
       {
         batch.material->activate(gl, context.minFilterMode(), context.magFilterMode());
         gl.texParameteri(
           GL_TEXTURE_2D,
           GL_TEXTURE_WRAP_S,
-          batch.addressU == DahSceneMaterial::AddressMode::ClampToEdge
-            ? GL_CLAMP_TO_EDGE
-            : GL_REPEAT);
+          batch.addressU == DahSceneMaterial::AddressMode::ClampToEdge ? GL_CLAMP_TO_EDGE
+                                                                       : GL_REPEAT);
         gl.texParameteri(
           GL_TEXTURE_2D,
           GL_TEXTURE_WRAP_T,
-          batch.addressV == DahSceneMaterial::AddressMode::ClampToEdge
-            ? GL_CLAMP_TO_EDGE
-            : GL_REPEAT);
+          batch.addressV == DahSceneMaterial::AddressMode::ClampToEdge ? GL_CLAMP_TO_EDGE
+                                                                       : GL_REPEAT);
       }
       if (batch.vertexArray.setup(gl, shader.program()))
       {
@@ -328,12 +367,22 @@ DahSceneReferenceResult buildDahSceneReference(
       }
     };
 
-    for (const auto& placement : manifest.placements)
-    {
-      const auto lodIt = std::ranges::find_if(
+    const auto appendPlacement = [&](
+                                   const DahScenePlacement& placement,
+                                   const bool requireRequestedLod) {
+      auto lodIt = std::ranges::find_if(
         placement.lods, [&](const auto& lod) { return lod.index == lodIndex; });
+      if (
+        lodIt == placement.lods.end() && !requireRequestedLod && !placement.lods.empty())
+      {
+        lodIt = placement.lods.begin();
+      }
       if (lodIt == placement.lods.end())
       {
+        if (!requireRequestedLod)
+        {
+          return;
+        }
         throw std::runtime_error{
           "DAH scene placement lacks requested LOD: " + placement.id};
       }
@@ -343,9 +392,9 @@ DahSceneReferenceResult buildDahSceneReference(
         throw std::runtime_error{"DAH scene placement references missing geometry"};
       }
       const auto& geometry = *geometryIt->second;
-      if (geometry.vertices.length != geometry.vertexCount * 24u)
+      if (geometry.vertices.length != geometry.vertexCount * geometry.vertexStride)
       {
-        throw std::runtime_error{"DAH scene vertex view does not match stride 24"};
+        throw std::runtime_error{"DAH scene vertex view does not match its stride"};
       }
       if (geometry.triangles.length != geometry.triangleCount * 12u)
       {
@@ -354,11 +403,15 @@ DahSceneReferenceResult buildDahSceneReference(
 
       auto positions = std::vector<vm::vec3f>{};
       auto uvs = std::vector<vm::vec2f>{};
+      auto normals = std::vector<vm::vec3f>{};
+      auto colors = std::vector<vm::vec4f>{};
       positions.reserve(static_cast<size_t>(geometry.vertexCount));
       uvs.reserve(static_cast<size_t>(geometry.vertexCount));
+      normals.reserve(static_cast<size_t>(geometry.vertexCount));
+      colors.reserve(static_cast<size_t>(geometry.vertexCount));
       for (std::uint64_t i = 0; i < geometry.vertexCount; ++i)
       {
-        const auto offset = geometry.vertices.offset + i * 24u;
+        const auto offset = geometry.vertices.offset + i * geometry.vertexStride;
         positions.push_back(transformPosition(
           vm::vec3f{
             readF32(buffer, offset),
@@ -366,6 +419,24 @@ DahSceneReferenceResult buildDahSceneReference(
             readF32(buffer, offset + 8u)},
           placement.matrix));
         uvs.emplace_back(readF32(buffer, offset + 12u), readF32(buffer, offset + 16u));
+        if (geometry.kind == "static-world-object")
+        {
+          const auto snorm = [](const std::int16_t value) {
+            return std::max(-1.0f, static_cast<float>(value) / 32767.0f);
+          };
+          normals.push_back(transformNormal(
+            vm::vec3f{
+              snorm(readI16(buffer, offset + 20u)),
+              snorm(readI16(buffer, offset + 22u)),
+              snorm(readI16(buffer, offset + 24u))},
+            placement.matrix));
+          colors.emplace_back(1.0f, 1.0f, 1.0f, 1.0f);
+        }
+        else
+        {
+          normals.emplace_back(0.0f, 0.0f, 1.0f);
+          colors.push_back(terrainDiffuseColor(buffer, offset + 20u));
+        }
       }
 
       auto triangleCursor = std::uint64_t{0};
@@ -416,10 +487,13 @@ DahSceneReferenceResult buildDahSceneReference(
           const auto& a = positions[index0];
           const auto& b = positions[index1];
           const auto& c = positions[index2];
-          const auto normal = faceNormal(a, b, c);
-          batch.vertices.emplace_back(a, normal, uvs[index0]);
-          batch.vertices.emplace_back(b, normal, uvs[index1]);
-          batch.vertices.emplace_back(c, normal, uvs[index2]);
+          const auto flatNormal = faceNormal(a, b, c);
+          const auto& normal0 = geometry.kind == "terrain" ? flatNormal : normals[index0];
+          const auto& normal1 = geometry.kind == "terrain" ? flatNormal : normals[index1];
+          const auto& normal2 = geometry.kind == "terrain" ? flatNormal : normals[index2];
+          batch.vertices.emplace_back(a, normal0, uvs[index0], colors[index0]);
+          batch.vertices.emplace_back(b, normal1, uvs[index1], colors[index1]);
+          batch.vertices.emplace_back(c, normal2, uvs[index2], colors[index2]);
           addToBounds(a);
           addToBounds(b);
           addToBounds(c);
@@ -432,6 +506,18 @@ DahSceneReferenceResult buildDahSceneReference(
       }
       result.nativeTriangleCount += geometry.triangleCount;
       ++result.placementCount;
+    };
+
+    for (const auto& placement : manifest.placements)
+    {
+      appendPlacement(placement, true);
+    }
+    for (const auto& placement : manifest.objectPlacements)
+    {
+      if (placement.editorCollection == "buildings")
+      {
+        appendPlacement(placement, false);
+      }
     }
 
     if (!haveBounds)

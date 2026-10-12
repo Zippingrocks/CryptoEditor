@@ -333,6 +333,10 @@ QWidget* DahMapElements::createTab(const DahMapElementTab tab)
   tree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
   tree->setRootIsDecorated(true);
   tree->setAlternatingRowColors(true);
+  if (tab == DahMapElementTab::Buildings)
+  {
+    m_buildingsTree = tree;
+  }
 
   auto collections = std::map<std::string_view, QTreeWidgetItem*>{};
   for (const auto& group : Groups)
@@ -383,10 +387,13 @@ void DahMapElements::updateStatus()
 {
   if (const auto* scene = m_document.dahSceneInfo())
   {
-    m_status->setText(tr("%1 is loaded as verified native terrain. Building entries "
-                         "remain catalog-only until scenery identities, placements, "
-                         "LODs, collision, and destruction links are decoded.")
-                        .arg(QString::fromStdString(scene->mapName)));
+    m_status->setText(
+      tr("%1: %2 native world placements, including %3 building/world-object "
+         "placements. Renderable structures use their retail archetype, transform, "
+         "mesh, material slots, and textures.")
+        .arg(QString::fromStdString(scene->mapName))
+        .arg(scene->worldPlacementCount)
+        .arg(scene->buildingPlacementCount));
   }
   else
   {
@@ -394,6 +401,55 @@ void DahMapElements::updateStatus()
       tr("Catalog taxonomy is ready. Open a .dahscene to associate verified native "
          "resources; placement is disabled until the relevant adapter is implemented."));
   }
+  updateNativeBuildings();
+}
+
+void DahMapElements::updateNativeBuildings()
+{
+  if (m_buildingsTree == nullptr)
+  {
+    return;
+  }
+  if (m_nativeBuildingsRoot != nullptr)
+  {
+    delete m_buildingsTree->takeTopLevelItem(
+      m_buildingsTree->indexOfTopLevelItem(m_nativeBuildingsRoot));
+    m_nativeBuildingsRoot = nullptr;
+  }
+  const auto* scene = m_document.dahSceneInfo();
+  if (scene == nullptr)
+  {
+    return;
+  }
+
+  m_nativeBuildingsRoot = new QTreeWidgetItem{
+    m_buildingsTree,
+    {tr("%1 Native Placements").arg(QString::fromStdString(scene->mapName)),
+     tr("Retail world.instance-database")}};
+  auto font = m_nativeBuildingsRoot->font(0);
+  font.setBold(true);
+  m_nativeBuildingsRoot->setFont(0, font);
+
+  auto archetypes = std::map<std::string, QTreeWidgetItem*>{};
+  for (const auto& placement : scene->buildingPlacements)
+  {
+    const auto label = placement.assetName.empty() ? placement.id : placement.assetName;
+    auto [it, inserted] = archetypes.try_emplace(label, nullptr);
+    if (inserted)
+    {
+      it->second = new QTreeWidgetItem{
+        m_nativeBuildingsRoot,
+        {QString::fromStdString(label), QString::fromStdString(placement.nativeClass)}};
+    }
+    const auto position =
+      tr("x %1, y %2, z %3 — %4")
+        .arg(placement.position[0], 0, 'f', 2)
+        .arg(placement.position[1], 0, 'f', 2)
+        .arg(placement.position[2], 0, 'f', 2)
+        .arg(placement.renderable ? tr("native mesh") : tr("placement preserved"));
+    new QTreeWidgetItem{it->second, {QString::fromStdString(placement.id), position}};
+  }
+  m_nativeBuildingsRoot->setExpanded(true);
 }
 
 void DahMapElements::updateFilter(const QString& text)

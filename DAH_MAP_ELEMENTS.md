@@ -46,10 +46,17 @@ building placement
   -> load group and streaming ownership
 ```
 
-The catalog currently establishes this UI and data taxonomy without inventing
-retail asset names. Drag placement stays disabled until the scenery reader can
-provide verified resource identities, placements, transforms, LODs, and linked
-systems.
+For Area 42, the Buildings tab is now populated from the retail
+`world.instance-database`, not from a speculative catalog. It exposes 18 native
+placements grouped under the eight asset identities present in the map. Seventeen
+placements currently resolve through actor archetype, visual LOD, static mesh,
+material, and texture records and appear in the reference viewport. The guard
+tower placement and archetype are preserved, but its segmented/destructible
+material indirection is still reported as unresolved.
+
+Placement editing stays disabled until unchanged native serialization proves
+that record identity, package ownership, linked collision/destruction data, and
+unknown fields survive a no-op round trip.
 
 ## Authoring rule
 

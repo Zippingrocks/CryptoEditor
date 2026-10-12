@@ -24,6 +24,7 @@ uniform float Alpha;
 uniform bool ApplyMaterial;
 uniform sampler2D Material;
 uniform bool ApplyTinting;
+uniform bool ApplyVertexColor;
 uniform vec4 TintColor;
 uniform bool GrayScale;
 uniform bool RenderGrid;
@@ -49,6 +50,10 @@ void main()
   if (ApplyMaterial)
   {
     gl_FragColor = texture2D(Material, gl_TexCoord[0].st);
+    if (ApplyVertexColor)
+    {
+      gl_FragColor *= faceColor;
+    }
   }
   else
   {

@@ -443,15 +443,33 @@ bool AppController::openDocument(const std::filesystem::path& path)
                const auto margin =
                  std::max({1024.0, size.x() * 0.05, size.y() * 0.05, size.z() * 0.05});
                const auto worldBounds = sceneBounds.expand(margin);
+               auto buildingPlacements = std::vector<DahBuildingPlacementInfo>{};
+               buildingPlacements.reserve(
+                 static_cast<size_t>(manifest.counts.buildingPlacements));
+               for (const auto& placement : manifest.objectPlacements)
+               {
+                 if (placement.editorCollection == "buildings")
+                 {
+                   buildingPlacements.push_back(DahBuildingPlacementInfo{
+                     placement.id,
+                     placement.nativeClass,
+                     placement.assetName,
+                     {placement.matrix[12], placement.matrix[13], placement.matrix[14]},
+                     !placement.lods.empty()});
+                 }
+               }
                const auto info = DahSceneInfo{
                  *sceneDirectory,
                  manifest.profileId,
                  manifest.mapName,
                  sceneBounds,
-                 manifest.counts.placements,
-                 manifest.counts.lods,
+                 manifest.counts.terrainPlacements,
+                 manifest.counts.terrainLods,
                  manifest.counts.geometries,
-                 {lod0Reference.nativeTriangleCount, lod1Reference.nativeTriangleCount}};
+                 manifest.counts.worldPlacements,
+                 manifest.counts.buildingPlacements,
+                 {lod0Reference.nativeTriangleCount, lod1Reference.nativeTriangleCount},
+                 std::move(buildingPlacements)};
                auto lod0Renderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                auto lod1Renderer =
@@ -482,12 +500,12 @@ bool AppController::openDocument(const std::filesystem::path& path)
 
                           auto* lod0Layer = addDahDisplayLayer(
                             map,
-                            "DAH Native Terrain — LOD0",
+                            "DAH Native Scene — Terrain LOD0 + Buildings",
                             0,
                             mdl::VisibilityState::Shown);
                           auto* lod1Layer = addDahDisplayLayer(
                             map,
-                            "DAH Native Terrain — LOD1",
+                            "DAH Native Scene — Terrain LOD1 + Buildings",
                             1,
                             mdl::VisibilityState::Hidden);
                           mapWindow->document().setDahSceneReference(

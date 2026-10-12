@@ -30,6 +30,7 @@ class QLineEdit;
 class QString;
 class QTabWidget;
 class QTreeWidget;
+class QTreeWidgetItem;
 class QWidget;
 
 namespace tb::ui
@@ -68,6 +69,8 @@ private:
   QLineEdit* m_filter = nullptr;
   QTabWidget* m_tabs = nullptr;
   std::vector<QTreeWidget*> m_trees;
+  QTreeWidget* m_buildingsTree = nullptr;
+  QTreeWidgetItem* m_nativeBuildingsRoot = nullptr;
   NotifierConnection m_notifierConnection;
 
 public:
@@ -78,6 +81,7 @@ private:
   QWidget* createTab(DahMapElementTab tab);
   void connectObservers();
   void updateStatus();
+  void updateNativeBuildings();
   void updateFilter(const QString& text);
 };
 

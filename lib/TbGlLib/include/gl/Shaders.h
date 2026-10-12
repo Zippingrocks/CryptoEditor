@@ -64,6 +64,16 @@ inline const ShaderConfig FaceShader = ShaderConfig{
    "Face.fragsh"},
 };
 
+inline const ShaderConfig DahReferenceShader = ShaderConfig{
+  "DAH Native Reference",
+  {"DahReference.vertsh"},
+  {"AlphaFunc.fragsh",
+   "GridCommon.fragsh",
+   "Grid.fragsh",
+   "MapBounds.fragsh",
+   "Face.fragsh"},
+};
+
 inline const ShaderConfig PatchShader = ShaderConfig{
   "Patch",
   {"Face.vertsh"},
