@@ -131,6 +131,17 @@ struct DahSceneLayer
   std::uint64_t loadGroup = 0;
   std::uint64_t placementCount = 0;
   std::uint64_t scriptCallCount = 0;
+  std::vector<std::string> missionOwners;
+  std::vector<std::string> commands;
+};
+
+struct DahSceneMissionRegistration
+{
+  std::string name;
+  std::string type;
+  std::string zone;
+  std::string source;
+  std::string status;
 };
 
 struct DahSceneEntityTag
@@ -288,7 +299,10 @@ struct DahSceneManifest
   std::vector<DahSceneObjective> objectives;
   std::vector<DahSceneRegion> regions;
   std::vector<DahSceneLayer> layers;
+  std::vector<DahSceneMissionRegistration> missions;
   std::vector<DahSceneEntityTag> entityTags;
+  std::uint64_t directedSpawnRecipeCount = 0;
+  std::uint64_t directedRoadRecipeCount = 0;
   std::vector<std::string> unresolvedSystems;
 };
 

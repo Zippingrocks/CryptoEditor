@@ -26,6 +26,7 @@
 #include <QJsonObject>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <ranges>
@@ -168,6 +169,27 @@ std::string firstNameCandidate(const QJsonObject& object)
   if (!values.first().isString())
     throw JsonError{"Native name candidate must be a string"};
   return values.first().toString().toStdString();
+}
+
+std::string missionFromSource(std::string source)
+{
+  std::ranges::transform(source, source.begin(), [](const unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  std::ranges::replace(source, '\\', '/');
+  if (source.find("sandbox") != std::string::npos)
+    return "Sandbox";
+  const auto marker = std::string{"/missions/"};
+  const auto begin = source.find(marker);
+  if (begin == std::string::npos)
+    return {};
+  const auto nameBegin = begin + marker.size();
+  const auto nameEnd = source.find('/', nameBegin);
+  if (nameEnd != std::string::npos)
+    return source.substr(nameBegin, nameEnd - nameBegin);
+  const auto filename = source.substr(nameBegin);
+  const auto suffix = filename.find('_');
+  return suffix == std::string::npos ? filename : filename.substr(0, suffix);
 }
 
 QByteArray readFile(const std::filesystem::path& path)
@@ -1277,13 +1299,91 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
         if (!value.isObject())
           throw JsonError{"Native mission layer must be an object"};
         const auto entry = value.toObject();
-        result.layers.push_back(DahSceneLayer{
+        auto layer = DahSceneLayer{
           stringField(entry, "hash"),
           firstNameCandidate(entry),
           unsignedField(entry, "index"),
           unsignedField(entry, "load_group"),
           static_cast<std::uint64_t>(arrayField(entry, "placements").size()),
-          static_cast<std::uint64_t>(arrayField(entry, "script_calls").size())});
+          static_cast<std::uint64_t>(arrayField(entry, "script_calls").size())};
+        for (const auto& callValue : arrayField(entry, "script_calls"))
+        {
+          if (!callValue.isObject())
+            throw JsonError{"Native layer script call must be an object"};
+          const auto call = callValue.toObject();
+          const auto function = optionalStringField(call, "function");
+          const auto source = optionalStringField(call, "source_path");
+          const auto owner = missionFromSource(source);
+          if (
+            !owner.empty()
+            && std::ranges::find(layer.missionOwners, owner)
+                 == layer.missionOwners.end())
+            layer.missionOwners.push_back(owner);
+          auto command = function;
+          if (call.contains("literal_prefix_arguments"))
+          {
+            const auto arguments = arrayField(call, "literal_prefix_arguments");
+            if (!arguments.empty() && arguments.first().isString())
+              command += " " + arguments.first().toString().toStdString();
+          }
+          if (!source.empty())
+            command += " — " + source;
+          if (!command.empty())
+            layer.commands.push_back(std::move(command));
+        }
+        result.layers.push_back(std::move(layer));
+      }
+    }
+    if (json.contains("mission_registrations"))
+    {
+      for (const auto& value : arrayField(json, "mission_registrations"))
+      {
+        if (!value.isObject())
+          throw JsonError{"Mission registration must be an object"};
+        const auto entry = value.toObject();
+        auto name = optionalStringField(entry, "name");
+        if (name.empty() && entry.contains("arguments"))
+        {
+          const auto arguments = arrayField(entry, "arguments");
+          if (!arguments.empty() && arguments.first().isString())
+            name = arguments.first().toString().toStdString();
+        }
+        if (name.empty())
+          throw JsonError{"Mission registration needs a stable name"};
+        result.missions.push_back(DahSceneMissionRegistration{
+          std::move(name),
+          optionalStringField(entry, "type"),
+          optionalStringField(entry, "zone"),
+          stringField(entry, "source_path"),
+          stringField(entry, "status")});
+      }
+    }
+    if (json.contains("spawn_definitions"))
+    {
+      for (const auto& value : arrayField(json, "spawn_definitions"))
+      {
+        if (!value.isObject())
+          throw JsonError{"Spawn definition must be an object"};
+        const auto entry = value.toObject();
+        if (optionalStringField(entry, "kind") != "directed-spawn-table")
+          continue;
+        for (const auto& recipeValue : arrayField(entry, "recipes"))
+        {
+          if (!recipeValue.isObject())
+            throw JsonError{"Directed spawn recipe must be an object"};
+          ++result.directedSpawnRecipeCount;
+          const auto recipe = recipeValue.toObject();
+          const auto fields = arrayField(recipe, "native_fields");
+          if (!fields.empty() && fields.last().isArray())
+          {
+            const auto modes = fields.last().toArray();
+            if (std::ranges::any_of(modes, [](const auto& mode) {
+                  return mode.isString()
+                         && mode.toString().compare("road", Qt::CaseInsensitive) == 0;
+                }))
+              ++result.directedRoadRecipeCount;
+          }
+        }
       }
     }
     if (json.contains("entity_tags"))

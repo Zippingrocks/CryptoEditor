@@ -621,7 +621,18 @@ bool AppController::openDocument(const std::filesystem::path& path)
                    layer.index,
                    layer.loadGroup,
                    layer.placementCount,
-                   layer.scriptCallCount});
+                   layer.scriptCallCount,
+                   layer.missionOwners,
+                   layer.commands});
+               }
+               for (const auto& mission : manifest.missions)
+               {
+                 info.missions.push_back(DahMissionInfo{
+                   mission.name,
+                   mission.type,
+                   mission.zone,
+                   mission.source,
+                   mission.status});
                }
                for (const auto& tag : manifest.entityTags)
                {
@@ -638,6 +649,8 @@ bool AppController::openDocument(const std::filesystem::path& path)
                  info.entityTags.push_back(std::move(entry));
                }
                info.unresolvedSystems = manifest.unresolvedSystems;
+               info.directedSpawnRecipeCount = manifest.directedSpawnRecipeCount;
+               info.directedRoadRecipeCount = manifest.directedRoadRecipeCount;
                auto lod0Renderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                auto lod1Renderer =

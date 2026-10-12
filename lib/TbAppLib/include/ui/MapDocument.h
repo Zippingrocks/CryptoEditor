@@ -122,6 +122,17 @@ struct DahLayerInfo
   std::uint64_t loadGroup = 0;
   std::uint64_t placementCount = 0;
   std::uint64_t scriptCallCount = 0;
+  std::vector<std::string> missionOwners;
+  std::vector<std::string> commands;
+};
+
+struct DahMissionInfo
+{
+  std::string name;
+  std::string type;
+  std::string zone;
+  std::string source;
+  std::string status;
 };
 
 struct DahEntityTagInfo
@@ -184,7 +195,10 @@ struct DahSceneInfo
   std::vector<DahObjectiveInfo> objectives;
   std::vector<DahRegionInfo> regions;
   std::vector<DahLayerInfo> nativeLayers;
+  std::vector<DahMissionInfo> missions;
   std::vector<DahEntityTagInfo> entityTags;
+  std::uint64_t directedSpawnRecipeCount = 0;
+  std::uint64_t directedRoadRecipeCount = 0;
   std::vector<std::string> unresolvedSystems;
 };
 

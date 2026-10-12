@@ -19,9 +19,11 @@
 
 #include "ui/DahMapElements.h"
 
+#include <QComboBox>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QSignalBlocker>
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -30,11 +32,14 @@
 #include "gl/Camera.h"
 #include "ui/MapDocument.h"
 #include "ui/MapViewBase.h"
+#include "ui/DahSceneReference.h"
 #include "ui/ViewConstants.h"
 
 #include <array>
 #include <cmath>
 #include <map>
+#include <ranges>
+#include <unordered_set>
 
 namespace tb::ui
 {
@@ -512,7 +517,81 @@ void appendLayers(QTreeWidgetItem& root, const std::vector<DahLayerInfo>& layers
         "Native layer hash %1. Visibility is authored by mission scripts and is not "
         "simulated in this read-only scene.")
         .arg(QString::fromStdString(layer.hash)));
+    for (const auto& owner : layer.missionOwners)
+      new QTreeWidgetItem{
+        item,
+        {QStringLiteral("Mission owner"), QString::fromStdString(owner)}};
+    for (const auto& command : layer.commands)
+      new QTreeWidgetItem{
+        item,
+        {QStringLiteral("Native layer command"), QString::fromStdString(command)}};
   }
+  root.setExpanded(true);
+}
+
+void appendMissionWorkspaces(QTreeWidgetItem& root, const DahSceneInfo& scene)
+{
+  for (const auto& mission : scene.missions)
+  {
+    auto objectiveCount = std::uint64_t{0};
+    for (const auto& objective : scene.objectives)
+      if (objective.mission == mission.name)
+        ++objectiveCount;
+    auto* missionRoot = new QTreeWidgetItem{
+      &root,
+      {QString::fromStdString(mission.name),
+       QStringLiteral("%1 — %2 objectives — activation state not evaluated")
+         .arg(mission.type.empty() ? QStringLiteral("mission")
+                                  : QString::fromStdString(mission.type))
+         .arg(objectiveCount)}};
+    new QTreeWidgetItem{
+      missionRoot,
+      {QStringLiteral("Registration source"), QString::fromStdString(mission.source)}};
+    if (!mission.zone.empty())
+      new QTreeWidgetItem{
+        missionRoot,
+        {QStringLiteral("Registration zone"), QString::fromStdString(mission.zone)}};
+    auto* layersRoot = new QTreeWidgetItem{
+      missionRoot,
+      {QStringLiteral("Referenced native layers"),
+       QStringLiteral("References only; objects are never duplicated")}};
+    auto layerCount = std::uint64_t{0};
+    for (const auto& layer : scene.nativeLayers)
+    {
+      if (
+        std::ranges::find(layer.missionOwners, mission.name)
+        == layer.missionOwners.end())
+        continue;
+      ++layerCount;
+      auto* layerItem = new QTreeWidgetItem{
+        layersRoot,
+        {nativeName(layer.name, layer.hash, QStringLiteral("Unnamed layer")),
+         QStringLiteral("%1 placements — %2")
+           .arg(layer.placementCount)
+           .arg(QString::fromStdString(layer.hash))}};
+      for (const auto& command : layer.commands)
+        if (command.find(mission.name) != std::string::npos)
+          new QTreeWidgetItem{
+            layerItem,
+            {QStringLiteral("Command evidence"), QString::fromStdString(command)}};
+    }
+    layersRoot->setText(
+      1,
+      QStringLiteral("%1 referenced layers; references only, never duplicated")
+        .arg(layerCount));
+  }
+  auto* sharedRoot = new QTreeWidgetItem{
+    &root,
+    {QStringLiteral("Shared / unassigned native layers"),
+     QStringLiteral("No mission-specific script owner decoded")}};
+  for (const auto& layer : scene.nativeLayers)
+    if (layer.missionOwners.empty())
+      new QTreeWidgetItem{
+        sharedRoot,
+        {nativeName(layer.name, layer.hash, QStringLiteral("Unnamed layer")),
+         QStringLiteral("%1 placements — %2")
+           .arg(layer.placementCount)
+           .arg(QString::fromStdString(layer.hash))}};
   root.setExpanded(true);
 }
 
@@ -612,6 +691,12 @@ void DahMapElements::createGui()
   m_filter->setObjectName("DahMapElements_Filter");
   m_filter->setPlaceholderText(tr("Filter DAH map elements"));
 
+  m_missionView = new QComboBox{};
+  m_missionView->setObjectName("DahMapElements_MissionView");
+  m_missionView->setToolTip(
+    tr("Filters native viewport batches using proven mission-layer ownership. "
+       "Conditional objective phases are not simulated."));
+
   m_tabs = new QTabWidget{};
   m_tabs->setObjectName("DahMapElements_Tabs");
   for (const auto tab : Tabs)
@@ -628,11 +713,18 @@ void DahMapElements::createGui()
   layout->setSpacing(LayoutConstants::MediumVMargin);
   layout->addWidget(introduction);
   layout->addWidget(m_status);
+  layout->addWidget(new QLabel{tr("Viewport mission scope")});
+  layout->addWidget(m_missionView);
   layout->addWidget(m_filter);
   layout->addWidget(m_tabs, 1);
   setLayout(layout);
 
   connect(m_filter, &QLineEdit::textChanged, this, &DahMapElements::updateFilter);
+  connect(
+    m_missionView,
+    &QComboBox::currentIndexChanged,
+    this,
+    [this](int) { updateMissionView(); });
 }
 
 QWidget* DahMapElements::createTab(const DahMapElementTab tab)
@@ -737,12 +829,23 @@ void DahMapElements::connectObservers()
 
 void DahMapElements::updateStatus()
 {
+  const auto blocker = QSignalBlocker{m_missionView};
+  const auto previousMission = m_missionView->currentData().toString();
+  m_missionView->clear();
+  m_missionView->addItem(tr("All authored content (diagnostic)"), QStringLiteral("*"));
+  m_missionView->addItem(tr("Shared / unassigned only"), QString{});
   if (const auto* scene = m_document.dahSceneInfo())
   {
+    for (const auto& mission : scene->missions)
+      m_missionView->addItem(
+        QString::fromStdString(mission.name), QString::fromStdString(mission.name));
+    const auto previousIndex = m_missionView->findData(previousMission);
+    m_missionView->setCurrentIndex(previousIndex < 0 ? 0 : previousIndex);
     m_status->setText(
       tr("%1: %2 world records, including %3 buildings, %4 props and %5 humans; "
          "%6 scatter instances, %7 native landing visuals, %8 editor markers and %9 "
-         "objective definitions; %10 regions, %11 mission layers and %12 entity tags. "
+         "objective definitions; %10 regions, %11 mission layers, %12 registered "
+         "missions and %13 entity tags. "
          "Actors use authored reference poses. Native mission layers remain distinct; "
          "this is not a simulated mission state.")
         .arg(QString::fromStdString(scene->mapName))
@@ -756,6 +859,7 @@ void DahMapElements::updateStatus()
         .arg(scene->objectives.size())
         .arg(scene->regions.size())
         .arg(scene->nativeLayers.size())
+        .arg(scene->missions.size())
         .arg(scene->entityTags.size()));
   }
   else
@@ -767,6 +871,33 @@ void DahMapElements::updateStatus()
   updateNativeBuildings();
   updateNativeProps();
   updateNativeExpansion();
+  updateMissionView();
+}
+
+void DahMapElements::updateMissionView()
+{
+  const auto* scene = m_document.dahSceneInfo();
+  if (scene == nullptr || m_missionView == nullptr)
+    return;
+  const auto mission = m_missionView->currentData().toString().toStdString();
+  auto visibleLayers = std::optional<std::unordered_set<std::string>>{};
+  if (mission != "*")
+  {
+    visibleLayers.emplace();
+    for (const auto& layer : scene->nativeLayers)
+    {
+      const auto shared = layer.missionOwners.empty();
+      const auto owned = std::ranges::find(layer.missionOwners, mission)
+                         != layer.missionOwners.end();
+      if (shared || (!mission.empty() && owned))
+        visibleLayers->insert(layer.hash);
+    }
+  }
+  for (auto lod = 0u; lod < 2u; ++lod)
+    if (auto* renderer = m_document.dahSceneRenderer(lod))
+      setDahSceneReferenceLayerFilter(*renderer, visibleLayers);
+  for (auto* view : window()->findChildren<MapViewBase*>())
+    view->refreshViews();
 }
 
 void DahMapElements::updateNativeBuildings()
@@ -903,6 +1034,16 @@ void DahMapElements::updateNativeExpansion()
     m_nativeExpansionRoots.push_back(root);
     appendLayers(*root, scene->nativeLayers);
   }
+  if (!scene->missions.empty())
+  {
+    auto* root = new QTreeWidgetItem{
+      m_trees.at(4),
+      {tr("Mission Ownership Workspaces"),
+       tr("%1 registrations; shared objects are referenced, never copied")
+         .arg(scene->missions.size())}};
+    m_nativeExpansionRoots.push_back(root);
+    appendMissionWorkspaces(*root, *scene);
+  }
   if (!scene->entityTags.empty())
   {
     auto* root = new QTreeWidgetItem{
@@ -928,6 +1069,29 @@ void DahMapElements::updateNativeExpansion()
      tr("Live fog, local lights, reflections, shadows and mission-driven effects remain "
         "incomplete; they are not implied by this preview.")}};
   environmentRoot->setExpanded(true);
+  auto* trafficRoot = new QTreeWidgetItem{
+    m_trees.at(5),
+    {tr("Native Traffic & Route Representation"),
+     tr("Vehicles, spawn recipes and route geometry remain separate systems")}};
+  m_nativeExpansionRoots.push_back(trafficRoot);
+  new QTreeWidgetItem{
+    trafficRoot,
+    {tr("Fixed / authored vehicle actors"),
+     tr("%1 genuine placements rendered with their vehicle models")
+       .arg(scene->vehiclePlacements.size())}};
+  new QTreeWidgetItem{
+    trafficRoot,
+    {tr("Directed spawn recipes"),
+     tr("%1 definitions, including %2 verified road-mode recipes; these are not fixed "
+        "vehicle positions")
+       .arg(scene->directedSpawnRecipeCount)
+       .arg(scene->directedRoadRecipeCount)}};
+  new QTreeWidgetItem{
+    trafficRoot,
+    {tr("Traffic route polylines"),
+     tr("0 decoded. No spline is drawn from guessed vehicle positions; native route "
+        "vertices, direction and connections remain required.")}};
+  trafficRoot->setExpanded(true);
   auto* coverageRoot = new QTreeWidgetItem{
     m_trees.at(5),
     {tr("Area 42 Support Coverage"),

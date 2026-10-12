@@ -253,6 +253,7 @@ struct RenderBatch
   bool mipFilter = true;
   float lodBias = 0;
   std::string lightRole;
+  std::string nativeLayer;
 
   RenderBatch(
     std::vector<DahSceneReferenceBatch::Vertex> vertices,
@@ -282,6 +283,7 @@ private:
   std::vector<DahSceneBatchSortInfo> m_sortInfo;
   std::vector<DahSceneSun> m_suns;
   DahSceneFog m_fog;
+  std::optional<std::unordered_set<std::string>> m_visibleNativeLayers;
 
 public:
   DahReferenceRenderer(DahSceneReference reference, gl::ResourceManager& resourceManager)
@@ -339,7 +341,14 @@ public:
       rendered.mipFilter = batch.mipFilter && !batch.textureMips.empty();
       rendered.lodBias = batch.lodBias;
       rendered.lightRole = std::move(batch.lightRole);
+      rendered.nativeLayer = std::move(batch.nativeLayer);
     }
+  }
+
+  void setVisibleNativeLayers(
+    std::optional<std::unordered_set<std::string>> visibleNativeLayers)
+  {
+    m_visibleNativeLayers = std::move(visibleNativeLayers);
   }
 
   void prepare(gl::Gl& gl, gl::VboManager& vboManager) override
@@ -386,6 +395,10 @@ public:
     for (const auto index : order)
     {
       auto& batch = m_batches[index];
+      if (
+        m_visibleNativeLayers && !batch.nativeLayer.empty()
+        && !m_visibleNativeLayers->contains(batch.nativeLayer))
+        continue;
       const auto* texture = gl::getTexture(batch.material.get());
       const auto applyMaterial =
         context.showMaterials() && texture != nullptr && batch.state.pixelShader != 1;
@@ -754,7 +767,7 @@ DahSceneReferenceResult buildDahSceneReference(
           + ":" + std::to_string(state.nativeTerrain) + ":"
           + std::to_string(state.alphaTest) + ":" + std::to_string(state.rigidOpacity)
           + ":" + std::to_string(state.sky) + ":" + std::to_string(state.lightingMode)
-          + ":" + placement.lightRole
+          + ":" + placement.lightRole + ":" + placement.nativeLayer
           + (state.alphaMode == "blend" && !state.nativeTerrain ? ":" + placement.id : "");
         auto [batchIt, inserted] =
           batchIndices.try_emplace(batchKey, result.batches.size());
@@ -787,7 +800,8 @@ DahSceneReferenceResult buildDahSceneReference(
             nativeMaterial.nearestMagnification,
             nativeMaterial.mipFilter,
             nativeMaterial.lodBias,
-            placement.lightRole});
+            placement.lightRole,
+            placement.nativeLayer});
         }
         auto& batch = result.batches[batchIt->second];
 
@@ -885,6 +899,15 @@ std::unique_ptr<render::DirectRenderable> createDahSceneReferenceRenderer(
   DahSceneReference reference, gl::ResourceManager& resourceManager)
 {
   return std::make_unique<DahReferenceRenderer>(std::move(reference), resourceManager);
+}
+
+void setDahSceneReferenceLayerFilter(
+  render::DirectRenderable& renderer,
+  std::optional<std::unordered_set<std::string>> visibleNativeLayers)
+{
+  auto* reference = dynamic_cast<DahReferenceRenderer*>(&renderer);
+  if (reference != nullptr)
+    reference->setVisibleNativeLayers(std::move(visibleNativeLayers));
 }
 
 DahSceneReference buildDahSceneMarkerReference(const DahSceneManifest& manifest)

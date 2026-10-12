@@ -26,6 +26,7 @@
 #include <vector>
 
 class QLabel;
+class QComboBox;
 class QLineEdit;
 class QString;
 class QTabWidget;
@@ -66,6 +67,7 @@ class DahMapElements : public TabBookPage
 private:
   MapDocument& m_document;
   QLabel* m_status = nullptr;
+  QComboBox* m_missionView = nullptr;
   QLineEdit* m_filter = nullptr;
   QTabWidget* m_tabs = nullptr;
   std::vector<QTreeWidget*> m_trees;
@@ -87,6 +89,7 @@ private:
   void updateNativeBuildings();
   void updateNativeProps();
   void updateNativeExpansion();
+  void updateMissionView();
   void updateFilter(const QString& text);
 };
 

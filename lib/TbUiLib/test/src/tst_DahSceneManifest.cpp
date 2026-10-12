@@ -271,7 +271,28 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       {"index", 0},
       {"load_group", 0},
       {"placements", QJsonArray{QJsonObject{}}},
-      {"script_calls", QJsonArray{QJsonObject{}, QJsonObject{}}}}};
+      {"script_calls",
+       QJsonArray{
+         QJsonObject{
+           {"function", "instance.StartLayer"},
+           {"source_path", "input\\blocks\\sites\\area42\\scripts\\missions\\m1\\m1_objectives.lua"},
+           {"literal_prefix_arguments", QJsonArray{"test_layer"}}},
+         QJsonObject{}}}}};
+    json["mission_registrations"] = QJsonArray{QJsonObject{
+      {"name", "m1"},
+      {"type", "story"},
+      {"zone", "m1_zone"},
+      {"source_path", "input\\blocks\\sites\\area42\\scripts\\missions\\m1\\m1_ignition.lua"},
+      {"status", "static-expression-call"}}};
+    auto spawnRecipes = QJsonArray{};
+    spawnRecipes.append(QJsonObject{{
+      "native_fields",
+      QJsonArray{
+        "v_car", "vehicle_lane_follow", 1, 0, 5, QJsonArray{"directed", "road"}}}});
+    spawnRecipes.append(QJsonObject{{
+      "native_fields", QJsonArray{"v_tank", "tank_engage", 1, 0, 5, "DIRECTED"}}});
+    json["spawn_definitions"] = QJsonArray{QJsonObject{
+      {"kind", "directed-spawn-table"}, {"recipes", spawnRecipes}}};
     json["entity_tags"] = QJsonArray{QJsonObject{
       {"id", "tag:test"},
       {"name_candidates", QJsonArray{"test_tag"}},
@@ -301,6 +322,14 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     REQUIRE(scene.layers.size() == 1);
     CHECK(scene.layers.front().placementCount == 1);
     CHECK(scene.layers.front().scriptCallCount == 2);
+    CHECK(scene.layers.front().missionOwners == std::vector<std::string>{"m1"});
+    REQUIRE(scene.layers.front().commands.size() == 1);
+    CHECK(scene.layers.front().commands.front().starts_with("instance.StartLayer test_layer"));
+    REQUIRE(scene.missions.size() == 1);
+    CHECK(scene.missions.front().name == "m1");
+    CHECK(scene.missions.front().type == "story");
+    CHECK(scene.directedSpawnRecipeCount == 2);
+    CHECK(scene.directedRoadRecipeCount == 1);
     REQUIRE(scene.entityTags.size() == 1);
     CHECK(scene.entityTags.front().entityIds == std::vector<std::int64_t>{42});
     CHECK(

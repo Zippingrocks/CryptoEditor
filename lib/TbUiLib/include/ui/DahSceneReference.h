@@ -32,6 +32,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <unordered_set>
 
 namespace tb::gl
 {
@@ -59,6 +60,7 @@ struct DahSceneReferenceBatch
   bool mipFilter = true;
   float lodBias = 0.0f;
   std::string lightRole;
+  std::string nativeLayer;
 };
 
 struct DahSceneBatchSortInfo
@@ -103,5 +105,9 @@ DahSceneReference buildDahSceneRegionReference(const DahSceneManifest& manifest)
 
 std::unique_ptr<render::DirectRenderable> createDahSceneReferenceRenderer(
   DahSceneReference reference, gl::ResourceManager& resourceManager);
+
+void setDahSceneReferenceLayerFilter(
+  render::DirectRenderable& renderer,
+  std::optional<std::unordered_set<std::string>> visibleNativeLayers);
 
 } // namespace tb::ui

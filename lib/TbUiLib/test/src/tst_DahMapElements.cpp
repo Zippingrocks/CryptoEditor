@@ -17,6 +17,7 @@
  along with CryptoEditor. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <QComboBox>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 
@@ -146,7 +147,19 @@ TEST_CASE("DahMapElements", "[DahMapElements]")
     info.objectives.push_back(std::move(objective));
     info.regions.push_back(DahRegionInfo{
       "region:test", "b1_building", "0x00000001", "0xC4F70679", {25, 50, 75}});
-    info.nativeLayers.push_back(DahLayerInfo{"0xC4F70679", "m1_part1", 2, 0, 37, 4});
+    info.nativeLayers.push_back(DahLayerInfo{
+      "0xC4F70679",
+      "m1_part1",
+      2,
+      0,
+      37,
+      4,
+      {"b1"},
+      {"instance.StartLayer m1_part1 — b1_objectives.lua"}});
+    info.missions.push_back(DahMissionInfo{
+      "b1", "story", "b1_zone", "b1_ignition.lua", "static-expression-call"});
+    info.directedSpawnRecipeCount = 47;
+    info.directedRoadRecipeCount = 2;
     info.entityTags.push_back(DahEntityTagInfo{
       "tag:test", "b1_psimutants", "0x00000002", {44140}, {"world-placement:14:0001"}});
     info.unresolvedSystems.push_back("Collision remains unresolved.");
@@ -160,6 +173,13 @@ TEST_CASE("DahMapElements", "[DahMapElements]")
       nullptr,
       nullptr);
     auto inspector = DahMapElements{document};
+    auto* missionView =
+      inspector.findChild<QComboBox*>("DahMapElements_MissionView");
+    REQUIRE(missionView != nullptr);
+    CHECK(missionView->count() == 3);
+    CHECK(missionView->itemData(0).toString() == "*");
+    CHECK(missionView->itemData(1).toString().isEmpty());
+    CHECK(missionView->itemData(2).toString() == "b1");
     auto* tree = inspector.findChild<QTreeWidget*>("DahMapElements_GameplayTree");
     REQUIRE(tree != nullptr);
     auto named = [&](const QString& label) {
@@ -202,6 +222,8 @@ TEST_CASE("DahMapElements", "[DahMapElements]")
     CHECK(named("Mission Debris Pickups (authored placements)").size() == 1);
     CHECK(named("Native Mission / Load Layers").size() == 1);
     CHECK(named("m1_part1").front()->text(1).contains("37 placements"));
+    CHECK(named("Mission Ownership Workspaces").size() == 1);
+    CHECK(named("Referenced native layers").front()->text(1).contains("1 referenced"));
     CHECK(named("Native Entity Tags").size() == 1);
     CHECK(named("b1_psimutants").front()->text(1).contains("1 resolved"));
 
@@ -227,6 +249,11 @@ TEST_CASE("DahMapElements", "[DahMapElements]")
       return matches;
     };
     CHECK(systemNamed("Area 42 Support Coverage").size() == 1);
+    CHECK(systemNamed("Native Traffic & Route Representation").size() == 1);
+    CHECK(systemNamed("Fixed / authored vehicle actors").size() == 1);
+    CHECK(systemNamed("Directed spawn recipes").front()->text(1).contains("47"));
+    CHECK(systemNamed("Directed spawn recipes").front()->text(1).contains("2 verified"));
+    CHECK(systemNamed("Traffic route polylines").front()->text(1).contains("0 decoded"));
     CHECK(
       systemNamed("Known unresolved systems").front()->text(1).contains("1 explicit"));
   }

@@ -30,6 +30,29 @@ authoring categories are not evidence that a corresponding asset exists in Area
 42. Mission activation is not evaluated, and authored records may belong to
 mutually exclusive gameplay states.
 
+Gameplay also exposes nine native mission registrations as **Mission Ownership
+Workspaces**. Each workspace lists its registration source and zone, its
+objective count, and references to native layers proven by that mission's layer
+commands. Shared or currently unassigned layers remain separate. These are
+references to the original records, never duplicate scene objects. They organize
+authored ownership without pretending that the conditional runtime phase has
+already been evaluated.
+
+The viewport mission-scope selector defaults to **All authored content
+(diagnostic)**. Selecting a mission renders shared/unassigned native layers plus
+only the layers with proven command ownership for that mission. **Shared /
+unassigned only** removes all mission-owned batches. Filtering happens at native
+render-batch boundaries, so objects are not copied and their native identity is
+unchanged. This isolates missions from one another; it does not yet select a
+specific conditional objective phase inside a mission.
+
+Systems distinguishes traffic data from vehicle visuals. The 145 fixed vehicle
+actors keep their real models. Directed-spawn recipes remain non-positional
+definitions, including the verified `road` modes. Traffic route polylines remain
+at zero until native route vertices, direction, and graph connections are
+decoded; CryptoEditor does not infer a road graph from parked or initial vehicle
+positions.
+
 The **Elements** inspector contains six tabs:
 
 | Tab | Owns | Does not own |
