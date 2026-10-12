@@ -103,6 +103,28 @@ struct DahObjectPlacementInfo
   std::string nativeList;
 };
 
+struct DahObjectiveTargetInfo
+{
+  std::string kind;
+  std::string name;
+  std::string status;
+  std::optional<std::array<double, 3>> position;
+  std::vector<std::string> worldPlacementIds;
+  std::vector<std::string> nativeLayers;
+};
+
+struct DahObjectiveInfo
+{
+  std::string id;
+  std::string mission;
+  std::string name;
+  std::string type;
+  std::string status;
+  std::string source;
+  std::vector<DahObjectiveTargetInfo> targets;
+  std::vector<std::string> layerCommands;
+};
+
 struct DahSceneInfo
 {
   std::filesystem::path path;
@@ -129,6 +151,7 @@ struct DahSceneInfo
   std::vector<DahObjectPlacementInfo> populationPlacements;
   std::vector<DahObjectPlacementInfo> otherWorldPlacements;
   std::vector<DahObjectPlacementInfo> landingPlacements;
+  std::vector<DahObjectiveInfo> objectives;
 };
 
 class MapDocument

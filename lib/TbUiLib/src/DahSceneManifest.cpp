@@ -83,6 +83,25 @@ std::string optionalStringField(const QJsonObject& object, const char* key)
   return value.toString().toStdString();
 }
 
+template <size_t N>
+std::array<float, N> finiteArrayField(const QJsonObject& object, const char* key)
+{
+  const auto values = arrayField(object, key);
+  if (values.size() != N)
+    throw JsonError{"Unexpected native numeric array length"};
+  auto result = std::array<float, N>{};
+  for (size_t i = 0; i < N; ++i)
+  {
+    const auto v = values[static_cast<qsizetype>(i)];
+    if (
+      !v.isDouble() || !std::isfinite(v.toDouble())
+      || std::abs(v.toDouble()) > std::numeric_limits<float>::max())
+      throw JsonError{"Native numeric array must contain finite floats"};
+    result[i] = static_cast<float>(v.toDouble());
+  }
+  return result;
+}
+
 DahSceneMaterial::AddressMode addressModeField(const QJsonObject& object, const char* key)
 {
   const auto value = stringField(object, key);
@@ -481,9 +500,45 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
               parsed.rigidOpacity =
                 static_cast<float>(std::clamp(opacity.toDouble(), 0.0, 1.0));
           }
-          // Native lighting is not reconstructed yet. Do not turn a proven
-          // pixel-shader scale into an unsupported flat-white lighting model.
           material.actorState = std::move(parsed);
+        }
+      }
+      if (materialJson.contains("actor_material"))
+      {
+        const auto a = objectField(materialJson, "actor_material");
+        if (
+          optionalStringField(a, "uv_transform_status")
+          == "retail-initial-material-load-preserved")
+        {
+          material.actorUvTransform = finiteArrayField<8>(a, "effective_uv_transform");
+          material.diffuse = finiteArrayField<3>(a, "native_diffuse_color");
+          material.additive = finiteArrayField<3>(a, "native_additive_color");
+          const auto pixelShader = unsignedField(a, "native_pixel_shader_index");
+          if (pixelShader > 255)
+            throw JsonError{"Invalid native pixel shader index"};
+          material.pixelShader = static_cast<int>(pixelShader);
+          material.actorParametersVerified = true;
+        }
+      }
+      if (materialJson.contains("native_sampler"))
+      {
+        const auto s = objectField(materialJson, "native_sampler");
+        if (optionalStringField(s, "evidence_status") == "retail-code-verified")
+        {
+          const auto mag = stringField(s, "mag_filter");
+          const auto mip = stringField(s, "mip_filter");
+          const auto bias = s.value("lod_bias");
+          if (
+            stringField(s, "min_filter") != "linear"
+            || (mag != "linear" && mag != "nearest") || (mip != "linear" && mip != "none")
+            || !bias.isDouble() || !std::isfinite(bias.toDouble())
+            || std::abs(bias.toDouble()) > 100.0 || !s.value("generate_mipmaps").isBool()
+            || s.value("generate_mipmaps").toBool())
+            throw JsonError{"Unsupported native sampler state"};
+          material.nativeSampler = true;
+          material.nearestMagnification = mag == "nearest";
+          material.mipFilter = mip == "linear";
+          material.lodBias = static_cast<float>(bias.toDouble());
         }
       }
       result.materials.push_back(std::move(material));
@@ -509,6 +564,47 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
       if (sha256(readFile(texture.previewPath)) != texture.previewSha256)
       {
         throw JsonError{"Scene texture preview SHA-256 mismatch: " + texture.id};
+      }
+      if (preview.contains("native_mips"))
+      {
+        const auto mips = arrayField(preview, "native_mips");
+        const auto native = objectField(textureJson, "native");
+        auto width = unsignedField(native, "width");
+        auto height = unsignedField(native, "height");
+        if (
+          mips.isEmpty() || mips.size() > 16
+          || mips.size() != unsignedField(native, "mip_levels") || width == 0
+          || height == 0 || width > 16384 || height > 16384)
+          throw JsonError{"Invalid native texture mip chain"};
+        auto index = std::uint64_t{0};
+        for (const auto& value : mips)
+        {
+          if (!value.isObject())
+            throw JsonError{"Texture mip must be an object"};
+          const auto mipJson = value.toObject();
+          auto mip = DahSceneTextureMip{
+            safeChildPath(root, stringField(mipJson, "file")),
+            stringField(mipJson, "sha256"),
+            unsignedField(mipJson, "width"),
+            unsignedField(mipJson, "height")};
+          if (
+            unsignedField(mipJson, "level") != index || mip.width != width
+            || mip.height != height || sha256(readFile(mip.path)) != mip.sha256)
+            throw JsonError{"Native texture mip dimensions/order/hash mismatch"};
+          if (
+            index == 0
+            && (mip.path != texture.previewPath || mip.sha256 != texture.previewSha256))
+            throw JsonError{
+              "Texture preview must be the unmodified highest-resolution native mip"};
+          if (
+            width == 1 && height == 1
+            && index + 1 != static_cast<std::uint64_t>(mips.size()))
+            throw JsonError{"Native texture mip chain extends past 1x1"};
+          texture.nativeMips.push_back(std::move(mip));
+          width = std::max(std::uint64_t{1}, width / 2);
+          height = std::max(std::uint64_t{1}, height / 2);
+          ++index;
+        }
       }
       result.textures.push_back(std::move(texture));
     }
@@ -537,6 +633,15 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
         placement.editorCollection =
           optionalStringField(placementJson, "editor_collection");
         placement.previewStatus = optionalStringField(placementJson, "preview_status");
+        if (
+          placementJson.contains("native_light_role")
+          && !placementJson.value("native_light_role").isNull())
+        {
+          placement.lightRole =
+            stringField(objectField(placementJson, "native_light_role"), "role");
+          if (placement.lightRole != "static" && placement.lightRole != "dynamic")
+            throw JsonError{"Unsupported native visual light role"};
+        }
         if (const auto native = placementJson.value("native"); native.isObject())
         {
           placement.nativeLayer = optionalStringField(native.toObject(), "bucket_hash");
@@ -700,6 +805,54 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
                     || stringField(s, "depth_compare") != "less_equal")
                 throw JsonError{"Unsupported native terrain render state"};
               state.depthWrite = s.value("depth_write").toBool();
+              if (s.contains("native_pixel_shader_index"))
+              {
+                const auto index = unsignedField(s, "native_pixel_shader_index");
+                if (index <= 1)
+                  state.pixelShader = static_cast<int>(index);
+              }
+              lod.segmentStates.push_back(std::move(state));
+            }
+          }
+          if (lodJson.contains("sky_render_states"))
+          {
+            if (
+              placement.editorCollection != "environment-sky"
+              || !lod.segmentStates.empty() || !lod.parts.empty())
+              throw JsonError{"Native sky states require a single sky mesh"};
+            const auto states = arrayField(lodJson, "sky_render_states");
+            if (states.size() != geometryIt->segmentRecords.size())
+              throw JsonError{"Sky segment state count mismatch"};
+            for (const auto& value : states)
+            {
+              if (!value.isObject())
+                throw JsonError{"Sky segment state must be an object"};
+              const auto s = value.toObject();
+              auto state = DahSceneRenderState{};
+              state.sky = true;
+              state.lightingMode = 2;
+              state.depthWrite = false;
+              state.alphaTest = true;
+              state.alphaMode = stringField(s, "alpha_mode");
+              state.blendSource = stringField(s, "blend_source");
+              state.blendDestination = stringField(s, "blend_destination");
+              const auto alpha = unsignedField(s, "alpha_reference_u8");
+              if (
+                (state.alphaMode != "opaque" && state.alphaMode != "blend") || alpha > 255
+                || state.blendSource != "one"
+                || (state.blendDestination != "one" && state.blendDestination != "zero")
+                || stringField(s, "blend_equation") != "add"
+                || stringField(s, "alpha_compare") != "greater"
+                || s.value("depth_write").toBool(true)
+                || !s.value("alpha_test_enabled").toBool()
+                || s.value("vertex_rgb_scale").toDouble() != 2.0)
+                throw JsonError{"Unsupported native sky state"};
+              state.alphaReference = static_cast<float>(alpha) / 255.0f;
+              state.rgbScale = 2.0f;
+              state.uvTransform = finiteArrayField<8>(s, "effective_uv_transform");
+              const auto rgba = finiteArrayField<4>(s, "initial_vertex_rgba");
+              state.materialAdditive = {rgba[0], rgba[1], rgba[2]};
+              state.rigidOpacity = rgba[3];
               lod.segmentStates.push_back(std::move(state));
             }
           }
@@ -710,6 +863,44 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
     };
     parsePlacements(arrayField(json, "placements"), result.placements);
     parsePlacements(arrayField(json, "object_placements"), result.objectPlacements);
+    if (json.contains("sky_placements"))
+    {
+      const auto environment = objectField(json, "environment");
+      const auto sky = objectField(objectField(environment, "sky"), "draw_contract");
+      if (
+        !sky.value("first_visual_enabled").toBool()
+        || sky.value("second_visual_enabled").toBool()
+        || sky.value("depth_write").toBool(true)
+        || sky.value("force_far_depth").toBool(true) || !sky.value("depth_test").toBool()
+        || stringField(sky, "depth_compare") != "less_equal"
+        || stringField(sky, "draw_order") != "before native world geometry")
+        throw JsonError{"Unsupported native sky draw contract"};
+      parsePlacements(arrayField(json, "sky_placements"), result.skyPlacements);
+      if (
+        result.skyPlacements.size() != 1
+        || result.skyPlacements.front().editorCollection != "environment-sky")
+        throw JsonError{"Expected one verified camera-relative native sky visual"};
+    }
+    if (json.value("environment").isObject())
+    {
+      const auto environment = json.value("environment").toObject();
+      if (environment.value("lighting_contract").isObject())
+      {
+        const auto lighting = environment.value("lighting_contract").toObject();
+        for (const auto* role : {"static", "dynamic"})
+        {
+          const auto light = objectField(lighting, role);
+          if (
+            optionalStringField(light, "evidence_status")
+            == "retail-authored-light-verified")
+            result.suns.push_back(DahSceneSun{
+              role,
+              finiteArrayField<3>(light, "direction_world"),
+              finiteArrayField<3>(light, "diffuse_rgb"),
+              finiteArrayField<3>(light, "ambient_rgb")});
+        }
+      }
+    }
     if (version >= 4)
     {
       parsePlacements(arrayField(json, "landing_placements"), result.landingPlacements);
@@ -842,6 +1033,100 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
            != result.counts.renderableStructurePlacements)
     {
       throw JsonError{"Scene collection counts do not match the manifest"};
+    }
+    if (json.contains("objective_definitions"))
+    {
+      auto ids = std::unordered_set<std::string>{};
+      for (const auto& value : arrayField(json, "objective_definitions"))
+      {
+        if (!value.isObject())
+          throw JsonError{"Objective definition must be an object"};
+        const auto entry = value.toObject();
+        auto objective = DahSceneObjective{};
+        objective.id = stringField(entry, "id");
+        objective.mission = stringField(entry, "mission_table");
+        objective.name = stringField(entry, "name");
+        objective.type = stringField(entry, "type");
+        objective.status = stringField(entry, "activity");
+        objective.source = stringField(entry, "source_path");
+        if (!ids.insert(objective.id).second)
+          throw JsonError{"Duplicate objective definition id"};
+        for (const auto& targetValue : arrayField(entry, "targets"))
+        {
+          if (!targetValue.isObject())
+            throw JsonError{"Objective target must be an object"};
+          const auto targetEntry = targetValue.toObject();
+          auto target = DahSceneObjectiveTarget{};
+          target.kind = stringField(targetEntry, "kind");
+          target.name = stringField(targetEntry, "name");
+          target.status = stringField(targetEntry, "status");
+          if (targetEntry.contains("position"))
+          {
+            const auto values = arrayField(targetEntry, "position");
+            if (values.size() != 3)
+              throw JsonError{"Objective target position needs three numbers"};
+            auto position = std::array<double, 3>{};
+            for (auto axis = 0; axis < 3; ++axis)
+            {
+              if (!values[axis].isDouble() || !std::isfinite(values[axis].toDouble()))
+                throw JsonError{"Objective target position must be finite"};
+              position[static_cast<size_t>(axis)] = values[axis].toDouble();
+            }
+            target.position = position;
+          }
+          if (targetEntry.contains("native_layer_hash"))
+            target.nativeLayers.push_back(stringField(targetEntry, "native_layer_hash"));
+          if (targetEntry.contains("placement_refs"))
+          {
+            auto links = std::unordered_set<std::string>{};
+            for (const auto& linkValue : arrayField(targetEntry, "placement_refs"))
+            {
+              if (!linkValue.isObject())
+                throw JsonError{"Objective placement reference must be an object"};
+              const auto link = linkValue.toObject();
+              const auto id = stringField(link, "world_placement_id");
+              const auto native = std::ranges::find_if(
+                result.objectPlacements,
+                [&](const auto& placement) { return placement.id == id; });
+              if (native == result.objectPlacements.end() || !links.insert(id).second)
+                throw JsonError{
+                  "Objective has missing or duplicate world placement link"};
+              target.worldPlacementIds.push_back(id);
+              const auto layer = stringField(link, "native_layer_hash");
+              if (
+                std::ranges::find(target.nativeLayers, layer)
+                == target.nativeLayers.end())
+                target.nativeLayers.push_back(layer);
+            }
+          }
+          objective.targets.push_back(std::move(target));
+        }
+        if (entry.contains("layer_references"))
+        {
+          for (const auto& referenceValue : arrayField(entry, "layer_references"))
+          {
+            if (!referenceValue.isObject())
+              throw JsonError{"Objective layer reference must be an object"};
+            const auto reference = referenceValue.toObject();
+            const auto phase = stringField(reference, "phase");
+            for (const auto& layerValue : arrayField(reference, "layers"))
+            {
+              if (!layerValue.isObject())
+                throw JsonError{"Objective layer command must be an object"};
+              const auto layer = layerValue.toObject();
+              objective.layerCommands.push_back(
+                phase + ": " + stringField(layer, "operation") + " "
+                + stringField(layer, "name") + " ("
+                + stringField(layer, "native_layer_hash") + ")");
+            }
+          }
+        }
+        result.objectives.push_back(std::move(objective));
+      }
+      if (
+        result.objectives.size()
+        != unsignedField(objectField(json, "counts"), "objective_definitions"))
+        throw JsonError{"Objective definition count mismatch"};
     }
     validateArea42Counts(result);
     return result;

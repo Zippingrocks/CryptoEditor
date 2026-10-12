@@ -71,6 +71,12 @@ struct DahSceneRenderState
   float rgbScale = 1.0f;
   float rigidOpacity = 1.0f;
   int terrainLayer = 0;
+  bool sky = false;
+  int lightingMode = 0; // 0: native vertex color, 1: authored sun, 2: sky material color
+  int pixelShader = 0;
+  std::array<float, 3> materialDiffuse{1.0f, 1.0f, 1.0f};
+  std::array<float, 3> materialAdditive{};
+  std::array<float, 8> uvTransform{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
 };
 
 struct DahScenePart
@@ -101,6 +107,7 @@ struct DahScenePlacement
   std::vector<DahSceneLod> lods;
   std::string nativeLayer;
   std::string nativeList;
+  std::string lightRole;
 };
 
 struct DahSceneMarker
@@ -112,11 +119,42 @@ struct DahSceneMarker
   std::array<double, 3> position{};
 };
 
+struct DahSceneObjectiveTarget
+{
+  std::string kind;
+  std::string name;
+  std::string status;
+  std::optional<std::array<double, 3>> position;
+  std::vector<std::string> worldPlacementIds;
+  std::vector<std::string> nativeLayers;
+};
+
+struct DahSceneObjective
+{
+  std::string id;
+  std::string mission;
+  std::string name;
+  std::string type;
+  std::string status;
+  std::string source;
+  std::vector<DahSceneObjectiveTarget> targets;
+  std::vector<std::string> layerCommands;
+};
+
+struct DahSceneTextureMip
+{
+  std::filesystem::path path;
+  std::string sha256;
+  std::uint64_t width = 0;
+  std::uint64_t height = 0;
+};
+
 struct DahSceneTexture
 {
   std::string id;
   std::filesystem::path previewPath;
   std::string previewSha256;
+  std::vector<DahSceneTextureMip> nativeMips;
 };
 
 struct DahSceneMaterial
@@ -134,6 +172,23 @@ struct DahSceneMaterial
   std::string alphaMode = "opaque";
   float alphaReference = 0.0f;
   std::optional<DahSceneRenderState> actorState;
+  bool actorParametersVerified = false;
+  std::array<float, 8> actorUvTransform{1, 0, 0, 0, 0, 1, 0, 0};
+  std::array<float, 3> diffuse{1, 1, 1};
+  std::array<float, 3> additive{};
+  int pixelShader = 0;
+  bool nativeSampler = false;
+  bool nearestMagnification = false;
+  bool mipFilter = true;
+  float lodBias = 0.0f;
+};
+
+struct DahSceneSun
+{
+  std::string role;
+  std::array<float, 3> direction{};
+  std::array<float, 3> diffuse{};
+  std::array<float, 3> ambient{};
 };
 
 struct DahSceneCounts
@@ -185,7 +240,10 @@ struct DahSceneManifest
   std::vector<DahScenePlacement> objectPlacements;
   std::vector<DahScenePlacement> scatterPlacements;
   std::vector<DahScenePlacement> landingPlacements;
+  std::vector<DahScenePlacement> skyPlacements;
+  std::vector<DahSceneSun> suns;
   std::vector<DahSceneMarker> markers;
+  std::vector<DahSceneObjective> objectives;
 };
 
 struct DahSceneLoadError

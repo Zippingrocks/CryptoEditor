@@ -1,0 +1,38 @@
+#version 120
+
+/* Copyright (C) 2026 CryptoEditor contributors. GPLv3 or later. */
+
+uniform bool ApplyMaterial;
+uniform sampler2D Material;
+uniform float NativeRgbScale;
+uniform bool RenderGrid;
+uniform float GridSize;
+uniform float GridAlpha;
+varying vec4 modelCoordinates;
+varying vec3 modelNormal;
+varying vec4 faceColor;
+varying vec3 viewVector;
+
+bool passesAlphaFunc(float alpha);
+float grid(vec3 coords, vec3 normal, float gridSize, float minGridSize, float lineWidthFactor);
+vec3 applySoftMapBoundsTint(vec3 inputFragColor, vec3 worldCoords);
+vec3 adaptiveGridColor(vec3 background);
+float texturedGridAlpha(float alpha);
+
+void main()
+{
+  vec4 nativeColor = faceColor;
+  if (ApplyMaterial) nativeColor *= texture2D(Material, gl_TexCoord[0].st);
+  if (!passesAlphaFunc(nativeColor.a)) discard;
+  // Native pixel shaders 0/1 apply RGB2 AFTER interpolation and sampling.
+  // Scaling vertex colors earlier changes saturated blends across triangles.
+  nativeColor.rgb = clamp(NativeRgbScale * nativeColor.rgb, 0.0, 1.0);
+  if (RenderGrid && GridAlpha > 0.0)
+  {
+    float change = max(length(dFdx(modelCoordinates.xyz)), length(dFdy(modelCoordinates.xyz)));
+    float value = grid(modelCoordinates.xyz, modelNormal, GridSize, 2.0 * change, min(4.0 * change, 1.0));
+    value *= 1.0 - smoothstep(512.0, 1024.0, length(viewVector));
+    nativeColor.rgb = mix(nativeColor.rgb, adaptiveGridColor(nativeColor.rgb), value * texturedGridAlpha(GridAlpha));
+  }
+  gl_FragColor = vec4(applySoftMapBoundsTint(nativeColor.rgb, modelCoordinates.xyz), nativeColor.a);
+}

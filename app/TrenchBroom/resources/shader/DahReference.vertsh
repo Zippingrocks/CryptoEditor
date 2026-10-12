@@ -8,6 +8,15 @@
 
 uniform vec4 Color;
 uniform vec3 CameraPosition;
+uniform bool CameraRelativeSky;
+uniform int LightingMode;
+uniform vec3 SunDirection;
+uniform vec3 SunDiffuse;
+uniform vec3 SunAmbient;
+uniform vec3 MaterialDiffuse;
+uniform vec3 MaterialAdditive;
+uniform vec4 UvRow0;
+uniform vec4 UvRow1;
 
 varying vec4 modelCoordinates;
 varying vec3 modelNormal;
@@ -16,10 +25,25 @@ varying vec3 viewVector;
 
 void main(void)
 {
-  gl_Position = gl_ProjectionMatrix * gl_ModelViewMatrix * gl_Vertex;
-  gl_TexCoord[0] = gl_MultiTexCoord0;
+  mat4 view = gl_ModelViewMatrix;
+  if (CameraRelativeSky) view[3].xyz = vec3(0.0);
+  // The retail sky keeps its actual mesh depth; it is not forced to z=w.
+  gl_Position = gl_ProjectionMatrix * view * gl_Vertex;
+  vec4 nativeUv = vec4(gl_MultiTexCoord0.xy, 0.0, 1.0);
+  gl_TexCoord[0] = vec4(dot(nativeUv, UvRow0), dot(nativeUv, UvRow1), 0.0, 1.0);
   modelCoordinates = gl_Vertex;
   modelNormal = gl_Normal;
   faceColor = Color * gl_Color;
+  if (LightingMode == 1)
+  {
+    // Authored sun preview. Runtime camera profiles, extra lights and object
+    // tint overrides are deliberately not represented as verified parity.
+    vec3 light = max(dot(gl_Normal, SunDirection), 0.0) * SunDiffuse + SunAmbient;
+    faceColor.rgb = clamp(light * MaterialDiffuse + MaterialAdditive, 0.0, 1.0);
+  }
+  else if (LightingMode == 2)
+  {
+    faceColor.rgb = MaterialAdditive;
+  }
   viewVector = CameraPosition - gl_Vertex.xyz;
 }

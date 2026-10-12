@@ -575,6 +575,29 @@ bool AppController::openDocument(const std::filesystem::path& path)
                    false,
                    marker.status});
                }
+               for (const auto& objective : manifest.objectives)
+               {
+                 auto entry = DahObjectiveInfo{
+                   objective.id,
+                   objective.mission,
+                   objective.name,
+                   objective.type,
+                   objective.status,
+                   objective.source,
+                   {},
+                   objective.layerCommands};
+                 for (const auto& target : objective.targets)
+                 {
+                   entry.targets.push_back(DahObjectiveTargetInfo{
+                     target.kind,
+                     target.name,
+                     target.status,
+                     target.position,
+                     target.worldPlacementIds,
+                     target.nativeLayers});
+                 }
+                 info.objectives.push_back(std::move(entry));
+               }
                auto lod0Renderer =
                  std::make_shared<std::unique_ptr<render::DirectRenderable>>();
                auto lod1Renderer =

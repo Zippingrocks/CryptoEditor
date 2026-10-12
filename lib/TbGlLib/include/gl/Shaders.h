@@ -71,7 +71,7 @@ inline const ShaderConfig DahReferenceShader = ShaderConfig{
    "GridCommon.fragsh",
    "Grid.fragsh",
    "MapBounds.fragsh",
-   "Face.fragsh"},
+   "DahReference.fragsh"},
 };
 
 inline const ShaderConfig PatchShader = ShaderConfig{

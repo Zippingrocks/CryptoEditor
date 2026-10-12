@@ -22,6 +22,13 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QOffscreenSurface>
+#include <QOpenGLContext>
+#include <QOpenGLFramebufferObject>
+#include <QOpenGLFunctions_2_1>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLVersionFunctionsFactory>
+#include <QSurfaceFormat>
 #include <QTemporaryDir>
 #include <QtEndian>
 
@@ -422,9 +429,9 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
     CHECK(
       color
       == vm::vec4f{
-        (64.0f * (1.0f / 255.0f)) * 2.0f,
-        (32.0f * (1.0f / 255.0f)) * 2.0f,
-        (16.0f * (1.0f / 255.0f)) * 2.0f,
+        64.0f * (1.0f / 255.0f),
+        32.0f * (1.0f / 255.0f),
+        16.0f * (1.0f / 255.0f),
         128.0f * (1.0f / 255.0f)});
     CHECK(batch.vertices.front().rest.rest.attr == vm::vec2f{0.0f, 0.0f});
 
@@ -638,17 +645,22 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(scene.counts.propPlacements == 1468);
       CHECK(scene.counts.propRenderablePlacements == 1468);
       CHECK(scene.counts.renderableStructurePlacements == 1547);
-      CHECK(scene.counts.geometries == 640);
-      CHECK(scene.geometries.size() == 640);
-      CHECK(scene.materials.size() == 790);
-      CHECK(scene.textures.size() == 337);
+      CHECK(scene.counts.geometries == 641);
+      CHECK(scene.geometries.size() == 641);
+      CHECK(scene.materials.size() == 792);
+      CHECK(scene.textures.size() == 348);
       CHECK(scene.counts.humanPlacements == 295);
       CHECK(scene.counts.humanRenderablePlacements == 295);
       CHECK(scene.counts.scatterPlacements == 15121);
       CHECK(scene.counts.scatterBatches == 654);
       CHECK(scene.counts.landingSites == 3);
       CHECK(scene.counts.spawnDefinitions == 7);
-      CHECK(scene.markers.size() == 142);
+      CHECK(scene.markers.size() == 148);
+      CHECK(scene.objectives.size() == 146);
+      REQUIRE(scene.skyPlacements.size() == 1);
+      CHECK(scene.suns.size() == 2);
+      for (const auto& texture : scene.textures)
+        CHECK_FALSE(texture.nativeMips.empty());
       CHECK(scene.placements.size() == 92);
       CHECK(scene.objectPlacements.size() == 2674);
       REQUIRE(scene.landingPlacements.size() == 3);
@@ -662,7 +674,8 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       const auto& reference = std::get<DahSceneReference>(referenceResult);
       CHECK(reference.placementCount == 17751);
       CHECK(reference.nativeTriangleCount == 1790050);
-      CHECK(reference.vertexCount() == 5370150);
+      CHECK(reference.vertexCount() == 5370534);
+      CHECK(reference.skyTriangleCount == 128);
       CHECK_FALSE(reference.batches.empty());
       CHECK(reference.texturedMaterialCount <= reference.batches.size());
 
@@ -671,11 +684,227 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       const auto& lod1Reference = std::get<DahSceneReference>(lod1Result);
       CHECK(lod1Reference.placementCount == 17751);
       CHECK(lod1Reference.nativeTriangleCount == 932771);
-      CHECK(lod1Reference.vertexCount() == 2798313);
+      CHECK(lod1Reference.vertexCount() == 2798697);
+      CHECK(lod1Reference.skyTriangleCount == 128);
       CHECK_FALSE(lod1Reference.batches.empty());
       CHECK(lod1Reference.texturedMaterialCount <= lod1Reference.batches.size());
     }
   }
+}
+
+TEST_CASE(
+  "DahSceneReference sorts sky, native terrain layers, then transparent instances")
+{
+  const auto batches = std::vector<DahSceneBatchSortInfo>{
+    {{0, 0, 10}, false, true, false, 0},
+    {{0, 0, 100}, false, true, false, 0},
+    {{}, false, true, true, 1},
+    {{}, false, false, false, 0},
+    {{}, true, true, false, 0},
+    {{}, false, true, true, -1},
+    {{}, false, false, true, 0}};
+  CHECK(
+    dahSceneDrawOrder(batches, {}, {0, 0, 1})
+    == std::vector<size_t>{4, 6, 3, 5, 2, 1, 0});
+  CHECK(
+    dahSceneDrawOrder(batches, {}, {0, 0, -1})
+    == std::vector<size_t>{4, 6, 3, 5, 2, 0, 1});
+}
+
+TEST_CASE("DahSceneManifest validates native mip sidecars")
+{
+  auto directory = QTemporaryDir{};
+  REQUIRE(directory.isValid());
+  writeTestScene(directory.path());
+  auto json = readTestScene(directory.path());
+  auto textures = json["textures"].toArray();
+  auto texture = textures[0].toObject();
+  auto preview = texture["preview"].toObject();
+  const auto second = QByteArray{"second native mip"};
+  writeFile(directory.path() + "/mip1.png", second);
+  auto mips = QJsonArray{
+    QJsonObject{
+      {"level", 0},
+      {"width", 2},
+      {"height", 2},
+      {"file", "preview.png"},
+      {"sha256", preview["sha256"]}},
+    QJsonObject{
+      {"level", 1},
+      {"width", 1},
+      {"height", 1},
+      {"file", "mip1.png"},
+      {"sha256", hash(second)}}};
+  SECTION("valid chain remains full resolution") {}
+  SECTION("rejects wrong dimensions")
+  {
+    auto m = mips[1].toObject();
+    m["width"] = 2;
+    mips[1] = m;
+  }
+  SECTION("rejects reordered chain")
+  {
+    auto m = mips[1].toObject();
+    m["level"] = 0;
+    mips[1] = m;
+  }
+  SECTION("rejects escaping sidecar")
+  {
+    auto m = mips[1].toObject();
+    m["file"] = "../mip1.png";
+    mips[1] = m;
+  }
+  SECTION("rejects changed sidecar")
+  {
+    writeFile(directory.path() + "/mip1.png", "bad");
+  }
+  preview["native_mips"] = mips;
+  texture["preview"] = preview;
+  texture["native"] = QJsonObject{{"width", 2}, {"height", 2}, {"mip_levels", 2}};
+  textures[0] = texture;
+  json["textures"] = textures;
+  writeFile(directory.path() + "/scene.json", QJsonDocument{json}.toJson());
+  const auto result = loadDahSceneManifest(directory.path().toStdWString());
+  if (
+    mips[1].toObject()["width"].toInt() == 1 && mips[1].toObject()["level"].toInt() == 1
+    && mips[1].toObject()["file"] == "mip1.png")
+  {
+    auto file = QFile{directory.path() + "/mip1.png"};
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    if (file.readAll() == second)
+    {
+      REQUIRE(std::holds_alternative<DahSceneManifest>(result));
+      CHECK(std::get<DahSceneManifest>(result).textures.front().nativeMips.size() == 2);
+      return;
+    }
+  }
+  CHECK(std::holds_alternative<DahSceneLoadError>(result));
+}
+
+TEST_CASE("DahSceneReference compiles the native GLSL program on a real GL context")
+{
+  const auto root = qEnvironmentVariable("CRYPTOEDITOR_SHADER_DIR");
+  if (root.isEmpty())
+    return; // Optional driver-backed integration test.
+  auto format = QSurfaceFormat{};
+  format.setVersion(2, 1);
+  format.setProfile(QSurfaceFormat::CompatibilityProfile);
+  auto context = QOpenGLContext{};
+  context.setFormat(format);
+  REQUIRE(context.create());
+  auto surface = QOffscreenSurface{};
+  surface.setFormat(context.format());
+  surface.create();
+  REQUIRE(surface.isValid());
+  REQUIRE(context.makeCurrent(&surface));
+  auto program = QOpenGLShaderProgram{};
+  const auto vertex =
+    program.addShaderFromSourceFile(QOpenGLShader::Vertex, root + "/DahReference.vertsh");
+  INFO(program.log().toStdString());
+  REQUIRE(vertex);
+  for (const auto* name :
+       {"AlphaFunc.fragsh",
+        "GridCommon.fragsh",
+        "Grid.fragsh",
+        "MapBounds.fragsh",
+        "DahReference.fragsh"})
+  {
+    const auto compiled =
+      program.addShaderFromSourceFile(QOpenGLShader::Fragment, root + "/" + name);
+    INFO(program.log().toStdString());
+    REQUIRE(compiled);
+  }
+  const auto linked = program.link();
+  INFO(program.log().toStdString());
+  REQUIRE(linked);
+  CHECK(program.uniformLocation("NativeRgbScale") >= 0);
+  CHECK(program.uniformLocation("CameraRelativeSky") >= 0);
+  CHECK(program.uniformLocation("SunDirection") >= 0);
+  CHECK(program.uniformLocation("UvRow0") >= 0);
+  auto* functions = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_2_1>(&context);
+  REQUIRE(functions != nullptr);
+  REQUIRE(functions->initializeOpenGLFunctions());
+  auto framebuffer = QOpenGLFramebufferObject{32, 32};
+  REQUIRE(framebuffer.isValid());
+  REQUIRE(framebuffer.bind());
+  REQUIRE(program.bind());
+  functions->glViewport(0, 0, 32, 32);
+  functions->glDisable(GL_DEPTH_TEST);
+  functions->glDisable(GL_BLEND);
+  functions->glDisable(GL_DITHER);
+  functions->glMatrixMode(GL_PROJECTION);
+  functions->glLoadIdentity();
+  functions->glMatrixMode(GL_MODELVIEW);
+  functions->glLoadIdentity();
+  GLuint texture = 0;
+  functions->glGenTextures(1, &texture);
+  functions->glBindTexture(GL_TEXTURE_2D, texture);
+  const std::array<unsigned char, 4> texel{128, 64, 32, 128};
+  functions->glTexImage2D(
+    GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, texel.data());
+  functions->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  functions->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  program.setUniformValue("Material", 0);
+  program.setUniformValue("ApplyMaterial", true);
+  program.setUniformValue("Color", QVector4D{1, 1, 1, 1});
+  program.setUniformValue("UvRow0", QVector4D{1, 0, 0, 0});
+  program.setUniformValue("UvRow1", QVector4D{0, 1, 0, 0});
+  program.setUniformValue("NativeRgbScale", 2.0f);
+  program.setUniformValue("LightingMode", 0);
+  program.setUniformValue("RenderGrid", false);
+  program.setUniformValue("ShowSoftMapBounds", false);
+  program.setUniformValue("CameraRelativeSky", false);
+  program.setUniformValue("EnableMasked", true);
+  program.setUniformValue("AlphaFuncCompare", 2);
+  const auto drawPixel = [&]() {
+    functions->glClearColor(0, 0, 0, 0);
+    functions->glClear(GL_COLOR_BUFFER_BIT);
+    functions->glBegin(GL_TRIANGLES);
+    functions->glColor4f(0.75f, 0.5f, 0.25f, 0.5f);
+    functions->glTexCoord2f(0.5f, 0.5f);
+    functions->glNormal3f(0, 0, 1);
+    functions->glVertex3f(-1, -1, 0);
+    functions->glVertex3f(3, -1, 0);
+    functions->glVertex3f(-1, 3, 0);
+    functions->glEnd();
+    auto pixel = std::array<unsigned char, 4>{};
+    functions->glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel.data());
+    return pixel;
+  };
+  program.setUniformValue("AlphaFuncThreshold", 0.2f);
+  const auto sampled = drawPixel();
+  for (size_t i = 0; i < 4; ++i)
+  {
+    const auto expected = std::array<int, 4>{192, 64, 16, 64}[i];
+    CHECK(std::abs(static_cast<int>(sampled[i]) - expected) <= 1);
+  }
+  program.setUniformValue("AlphaFuncThreshold", 0.3f);
+  CHECK(drawPixel() == std::array<unsigned char, 4>{0, 0, 0, 0});
+  program.setUniformValue("AlphaFuncThreshold", 0.2f);
+  program.setUniformValue("LightingMode", 2);
+  program.setUniformValue("MaterialAdditive", QVector3D{0.25f, 0.5f, 0.75f});
+  functions->glTranslatef(10, 0, 0);
+  CHECK(drawPixel() == std::array<unsigned char, 4>{0, 0, 0, 0});
+  program.setUniformValue("CameraRelativeSky", true);
+  const auto sky = drawPixel();
+  for (size_t i = 0; i < 4; ++i)
+    CHECK(
+      std::abs(static_cast<int>(sky[i]) - std::array<int, 4>{64, 64, 48, 64}[i]) <= 1);
+  functions->glLoadIdentity();
+  program.setUniformValue("CameraRelativeSky", false);
+  program.setUniformValue("LightingMode", 1);
+  program.setUniformValue("SunDirection", QVector3D{0, 0, 0.5f});
+  program.setUniformValue("SunDiffuse", QVector3D{0.5f, 0.4f, 0.3f});
+  program.setUniformValue("SunAmbient", QVector3D{0.1f, 0.2f, 0.3f});
+  program.setUniformValue("MaterialDiffuse", QVector3D{0.5f, 1, 0.25f});
+  program.setUniformValue("MaterialAdditive", QVector3D{0.1f, 0.05f, 0.2f});
+  const auto lit = drawPixel();
+  for (size_t i = 0; i < 4; ++i)
+    CHECK(
+      std::abs(static_cast<int>(lit[i]) - std::array<int, 4>{70, 58, 20, 64}[i]) <= 1);
+  functions->glDeleteTextures(1, &texture);
+  program.release();
+  framebuffer.release();
 }
 
 } // namespace tb::ui

@@ -53,7 +53,27 @@ struct DahSceneReferenceBatch
   std::string alphaMode = "opaque";
   float alphaReference = 0.0f;
   DahSceneRenderState state;
+  std::vector<DahSceneTextureMip> textureMips;
+  bool nativeSampler = false;
+  bool nearestMagnification = false;
+  bool mipFilter = true;
+  float lodBias = 0.0f;
+  std::string lightRole;
 };
+
+struct DahSceneBatchSortInfo
+{
+  vm::vec3f center;
+  bool sky = false;
+  bool blended = false;
+  bool terrain = false;
+  int terrainLayer = 0;
+};
+
+std::vector<size_t> dahSceneDrawOrder(
+  const std::vector<DahSceneBatchSortInfo>& batches,
+  const vm::vec3f& cameraPosition,
+  const vm::vec3f& cameraDirection);
 
 struct DahSceneReference
 {
@@ -63,6 +83,8 @@ struct DahSceneReference
   std::uint64_t placementCount = 0;
   std::uint64_t nativeTriangleCount = 0;
   std::uint64_t texturedMaterialCount = 0;
+  std::uint64_t skyTriangleCount = 0;
+  std::vector<DahSceneSun> suns;
 
   std::uint64_t vertexCount() const;
 };

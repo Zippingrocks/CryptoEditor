@@ -25,11 +25,15 @@
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QVariant>
 
+#include "gl/Camera.h"
 #include "ui/MapDocument.h"
+#include "ui/MapViewBase.h"
 #include "ui/ViewConstants.h"
 
 #include <array>
+#include <cmath>
 #include <map>
 
 namespace tb::ui
@@ -249,6 +253,56 @@ bool matchesFilter(const QTreeWidgetItem& item, const QString& filter)
 }
 
 constexpr auto AuthoringTaxonomyRole = Qt::UserRole + 1;
+constexpr auto NativeFocusPositionRole = Qt::UserRole + 2;
+constexpr auto NativePlacementLinkRole = Qt::UserRole + 3;
+
+void setNativeFocusPosition(QTreeWidgetItem& item, const std::array<double, 3>& position)
+{
+  item.setData(
+    0, NativeFocusPositionRole, QVariantList{position[0], position[1], position[2]});
+  const auto hint = QStringLiteral("Double-click to focus this genuine native location.");
+  item.setToolTip(0, item.toolTip(0) + "\n" + hint);
+  item.setToolTip(1, item.toolTip(1) + "\n" + hint);
+}
+
+std::optional<std::array<double, 3>> nativeFocusPosition(
+  const QTreeWidgetItem& item, const DahSceneInfo& scene)
+{
+  const auto point = item.data(0, NativeFocusPositionRole).toList();
+  if (point.size() == 3)
+  {
+    auto result = std::array<double, 3>{};
+    for (auto axis = 0; axis < 3; ++axis)
+    {
+      auto valid = false;
+      result[static_cast<size_t>(axis)] = point[axis].toDouble(&valid);
+      if (!valid || !std::isfinite(result[static_cast<size_t>(axis)]))
+        return {};
+    }
+    return result;
+  }
+  const auto link = item.data(0, NativePlacementLinkRole).toString().toStdString();
+  if (link.empty())
+    return {};
+  const auto collections = std::array{
+    &scene.buildingPlacements,
+    &scene.propPlacements,
+    &scene.humanPlacements,
+    &scene.scatterPlacements,
+    &scene.vehiclePlacements,
+    &scene.animalPlacements,
+    &scene.robotPlacements,
+    &scene.emplacementPlacements,
+    &scene.pickupPlacements,
+    &scene.populationPlacements,
+    &scene.otherWorldPlacements,
+    &scene.landingPlacements};
+  for (const auto* collection : collections)
+    for (const auto& placement : *collection)
+      if (placement.id == link)
+        return placement.position;
+  return {};
+}
 
 QString placementDetail(const DahObjectPlacementInfo& placement)
 {
@@ -303,9 +357,96 @@ void appendNativePlacements(
           {QString::fromStdString(placement->id), placementDetail(*placement)}};
         item->setToolTip(0, QString::fromStdString(placement->id));
         item->setToolTip(1, placementDetail(*placement));
+        setNativeFocusPosition(*item, placement->position);
       }
     }
     classRoot->setExpanded(true);
+  }
+  root.setExpanded(true);
+}
+
+void appendObjectives(
+  QTreeWidgetItem& root, const std::vector<DahObjectiveInfo>& objectives)
+{
+  using ObjectiveList = std::vector<const DahObjectiveInfo*>;
+  auto missions = std::map<std::string, std::map<std::string, ObjectiveList>>{};
+  for (const auto& objective : objectives)
+    missions[objective.mission][objective.type].push_back(&objective);
+  for (const auto& [mission, types] : missions)
+  {
+    auto* missionRoot = new QTreeWidgetItem{
+      &root,
+      {QString::fromStdString(mission),
+       QStringLiteral("Native script table; activation not simulated")}};
+    for (const auto& [type, records] : types)
+    {
+      auto* typeRoot = new QTreeWidgetItem{
+        missionRoot,
+        {QString::fromStdString(type),
+         QStringLiteral("%1 definitions").arg(records.size())}};
+      for (const auto* objective : records)
+      {
+        auto* item = new QTreeWidgetItem{
+          typeRoot,
+          {QString::fromStdString(objective->name),
+           QStringLiteral("Script definition — no intrinsic map position")}};
+        item->setToolTip(0, QString::fromStdString(objective->id));
+        item->setToolTip(
+          1,
+          QStringLiteral("No intrinsic position. Double-click a resolved target or "
+                         "placed-object link below to focus it."));
+        new QTreeWidgetItem{
+          item, {QStringLiteral("Source"), QString::fromStdString(objective->source)}};
+        new QTreeWidgetItem{
+          item,
+          {QStringLiteral("Runtime state"), QString::fromStdString(objective->status)}};
+        for (const auto& target : objective->targets)
+        {
+          auto detail = QString::fromStdString(target.status);
+          if (target.position)
+          {
+            detail += QStringLiteral(" — native region center x %1, y %2, z %3")
+                        .arg((*target.position)[0], 0, 'f', 2)
+                        .arg((*target.position)[1], 0, 'f', 2)
+                        .arg((*target.position)[2], 0, 'f', 2);
+          }
+          else if (target.worldPlacementIds.empty())
+          {
+            detail += QStringLiteral(" — no resolved map position");
+          }
+          auto* targetItem = new QTreeWidgetItem{
+            item, {QString::fromStdString(target.kind + ": " + target.name), detail}};
+          if (target.position)
+            setNativeFocusPosition(*targetItem, *target.position);
+          else
+            targetItem->setToolTip(
+              1,
+              QStringLiteral("No single resolved native position; use a placed-object "
+                             "link below, if available."));
+          for (const auto& layer : target.nativeLayers)
+            new QTreeWidgetItem{
+              targetItem,
+              {QStringLiteral("Native layer"), QString::fromStdString(layer)}};
+          for (const auto& link : target.worldPlacementIds)
+          {
+            auto* linkItem = new QTreeWidgetItem{
+              targetItem,
+              {QString::fromStdString(link),
+               QStringLiteral(
+                 "Reference to an existing authored object; not a new placement")}};
+            linkItem->setData(0, NativePlacementLinkRole, QString::fromStdString(link));
+            linkItem->setToolTip(
+              0,
+              QStringLiteral("Double-click to focus the referenced native placement; "
+                             "mission state is not changed."));
+          }
+        }
+        for (const auto& command : objective->layerCommands)
+          new QTreeWidgetItem{
+            item, {QStringLiteral("Layer command"), QString::fromStdString(command)}};
+      }
+    }
+    missionRoot->setExpanded(true);
   }
   root.setExpanded(true);
 }
@@ -409,6 +550,36 @@ QWidget* DahMapElements::createTab(const DahMapElementTab tab)
   tree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
   tree->setRootIsDecorated(true);
   tree->setAlternatingRowColors(true);
+  connect(
+    tree, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item, int) {
+      const auto* scene = m_document.dahSceneInfo();
+      if (!item || !scene)
+        return;
+      const auto nativePosition = nativeFocusPosition(*item, *scene);
+      if (!nativePosition)
+        return; // Definitions and unresolved targets never jump to an invented origin.
+      auto* selectedView = static_cast<MapViewBase*>(nullptr);
+      for (auto* view : window()->findChildren<MapViewBase*>())
+      {
+        if (!view->isVisible())
+          continue;
+        if (!selectedView || view->isCurrent())
+          selectedView = view;
+        if (view->isCurrent())
+          break;
+      }
+      if (!selectedView)
+        return;
+      const auto target = vm::vec3f{
+        static_cast<float>((*nativePosition)[0]),
+        static_cast<float>((*nativePosition)[1]),
+        static_cast<float>((*nativePosition)[2])};
+      // Preserve viewing direction and stand back 48 native units. Orthographic
+      // views still center the same target; no native object or layer is edited.
+      selectedView->moveCameraToPosition(
+        target - selectedView->camera().direction() * 48.0f, true);
+      selectedView->refreshViews();
+    });
   if (tab == DahMapElementTab::Buildings)
   {
     m_buildingsTree = tree;
@@ -474,7 +645,8 @@ void DahMapElements::updateStatus()
   {
     m_status->setText(
       tr("%1: %2 world records, including %3 buildings, %4 props and %5 humans; "
-         "%6 scatter instances, %7 native landing visuals and %8 editor markers. "
+         "%6 scatter instances, %7 native landing visuals, %8 editor markers and %9 "
+         "objective definitions. "
          "Actors use authored reference poses. Native mission layers remain distinct; "
          "this is not a simulated mission state.")
         .arg(QString::fromStdString(scene->mapName))
@@ -484,7 +656,8 @@ void DahMapElements::updateStatus()
         .arg(scene->humanPlacements.size())
         .arg(scene->scatterPlacements.size())
         .arg(scene->landingPlacements.size())
-        .arg(scene->markers.size()));
+        .arg(scene->markers.size())
+        .arg(scene->objectives.size()));
   }
   else
   {
@@ -591,14 +764,56 @@ void DahMapElements::updateNativeExpansion()
   populate(3, tr("Native Vehicle Placements"), scene->vehiclePlacements);
   populate(3, tr("Native Robots & Powersuits"), scene->robotPlacements);
   populate(4, tr("Native Emplacements & Defenses"), scene->emplacementPlacements);
-  populate(4, tr("Native Pickups & Collectibles"), scene->pickupPlacements);
+  auto probes = std::vector<DahObjectPlacementInfo>{};
+  auto debris = std::vector<DahObjectPlacementInfo>{};
+  auto otherPickups = std::vector<DahObjectPlacementInfo>{};
+  for (const auto& pickup : scene->pickupPlacements)
+  {
+    auto& destination = pickup.assetName == "pu_probe"        ? probes
+                        : pickup.assetName == "pu_ufo_debris" ? debris
+                                                              : otherPickups;
+    destination.push_back(pickup);
+  }
+  populate(4, tr("Collectible Probes (authored placements)"), probes);
+  populate(4, tr("Mission Debris Pickups (authored placements)"), debris);
+  populate(4, tr("Native Health & Ammo Pickups"), otherPickups);
   populate(
     4,
     tr("Native Population Definitions (not placed humans)"),
     scene->populationPlacements);
   populate(4, tr("Other Native World Records"), scene->otherWorldPlacements);
   populate(4, tr("Native Landing Site Visuals"), scene->landingPlacements);
-  populate(4, tr("Landing & Spawn Annotations (editor markers)"), scene->markers, true);
+  auto* environmentRoot = new QTreeWidgetItem{
+    m_trees.at(5),
+    {tr("Native Environment Preview"),
+     tr("Authored data inspection, not a live game lighting state")}};
+  m_nativeExpansionRoots.push_back(environmentRoot);
+  new QTreeWidgetItem{
+    environmentRoot,
+    {tr("Sky & authored sun"),
+     tr("Native sky and authored sun are supported when the scene provides verified "
+        "render contracts.")}};
+  new QTreeWidgetItem{
+    environmentRoot,
+    {tr("Unresolved runtime presentation"),
+     tr("Live fog, local lights, reflections, shadows and mission-driven effects remain "
+        "incomplete; they are not implied by this preview.")}};
+  environmentRoot->setExpanded(true);
+  populate(
+    4,
+    tr("Landing, Spawn & Objective Annotations (editor markers)"),
+    scene->markers,
+    true);
+  if (!scene->objectives.empty())
+  {
+    auto* root = new QTreeWidgetItem{
+      m_trees.at(4),
+      {tr("Mission Objectives (native script definitions)"),
+       tr("%1 definitions; no mission execution or invented placements")
+         .arg(scene->objectives.size())}};
+    m_nativeExpansionRoots.push_back(root);
+    appendObjectives(*root, scene->objectives);
+  }
   updateFilter(m_filter->text());
 }
 

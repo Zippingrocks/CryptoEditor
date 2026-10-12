@@ -161,6 +161,35 @@ disabled until the unchanged-save gate supplies a verified writer. See
 
 ## Scene organization
 
+### Native preview checkpoint — October 12, 2026
+
+The Area 42 read-only preview now consumes original authored texture mipmaps
+and native filtering/LOD bias. A separate DAH shader preserves terrain RGBA
+through interpolation and performs native RGB2 after sampling. Rigid basic
+materials use original UVs and a restricted authored-sun preview; generic editor
+camera-facing shading and brightness are not substituted for native lighting.
+The first native sky visual is camera-relative, retains its real mesh depth,
+and never writes depth. Transparent instances are depth-sorted separately from
+native terrain layers. This is not full retail draw-queue or lighting parity.
+
+Gameplay inspection includes 264 existing pickups and 146 mission objective
+definitions, grouped by mission and native objective type. Double-click placed
+objects, resolved region targets or object links to navigate to their native
+location. Unresolved targets have no fabricated position. Mission activation
+and script execution are not simulated.
+
+The upgraded scene retains 2,674 world records, 79 buildings, 76 selected
+building fixtures, 15,121 scatter instances, and both terrain LODs. It contains
+641 geometries, 792 materials and 348 referenced textures including secondary
+shader dependencies. Those secondary reflection stages are preserved but not
+yet rendered. Retail assets remain read-only; no AI upscaling is used.
+
+Driver-backed regression coverage compiles/links the actual GLSL and checks
+pixel output for native RGB scaling, alpha rejection, camera-relative sky and
+authored lighting. This does not replace a matched in-game camera comparison.
+Fog, local lights, runtime sun/tint changes, shadows, reflection shaders and
+the second sky visual remain explicitly unresolved.
+
 CryptoEditor reuses the editor's existing flat layers for map-wide visibility,
 locking, ordering, and export policy. Native DAH display data is represented by
 locked display layers, while future authored brushes and objects remain in

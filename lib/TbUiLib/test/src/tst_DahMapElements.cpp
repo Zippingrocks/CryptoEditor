@@ -17,7 +17,15 @@
  along with CryptoEditor. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
+
+#include "mdl/Map.h"
+#include "mdl/WorldNode.h"
+#include "render/Renderable.h"
 #include "ui/DahMapElements.h"
+#include "ui/MapDocument.h"
+#include "ui/MapDocumentFixture.h"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +36,15 @@
 
 namespace tb::ui
 {
+namespace
+{
+class EmptyObjectivePreview : public render::DirectRenderable
+{
+public:
+  void prepare(gl::Gl&, gl::VboManager&) override {}
+  void render(render::RenderContext&) override {}
+};
+} // namespace
 
 TEST_CASE("DahMapElements", "[DahMapElements]")
 {
@@ -76,6 +93,107 @@ TEST_CASE("DahMapElements", "[DahMapElements]")
       CHECK(std::ranges::any_of(
         groups, [tab](const auto& group) { return group.tab == tab; }));
     }
+  }
+
+  SECTION("objectives have explicit targets but no invented origin placement")
+  {
+    auto fixture = MapDocumentFixture{};
+    auto& document = fixture.create();
+    auto info = DahSceneInfo{};
+    info.mapName = "area42";
+    info.bounds = vm::bbox3d{8192.0};
+    info.pickupPlacements.push_back(DahObjectPlacementInfo{
+      "world-placement:00:0940",
+      "PowerupType",
+      "pu_probe",
+      {12, 34, 56},
+      true,
+      "authored pickup",
+      "Default",
+      "+0x10"});
+    info.pickupPlacements.push_back(DahObjectPlacementInfo{
+      "world-placement:02:0130",
+      "PowerupType",
+      "pu_ufo_debris",
+      {78, 90, 12},
+      true,
+      "authored pickup",
+      "m1_part1",
+      "+0x10"});
+    auto objective = DahObjectiveInfo{};
+    objective.id = "objective:test";
+    objective.mission = "b1";
+    objective.name = "kill_mutants";
+    objective.type = "TagDestroyed";
+    objective.status = "activation not simulated";
+    objective.source = "b1_objectives.lua";
+    objective.targets.push_back(DahObjectiveTargetInfo{
+      "tag", "player_alien", "unresolved-runtime-or-absent-native-target", {}, {}, {}});
+    objective.targets.push_back(DahObjectiveTargetInfo{
+      "region",
+      "b1_building",
+      "resolved-native-region",
+      std::array<double, 3>{25, 50, 75},
+      {},
+      {}});
+    objective.targets.push_back(DahObjectiveTargetInfo{
+      "tag",
+      "b1_psimutants",
+      "resolved-native-tag",
+      {},
+      {"world-placement:14:0001"},
+      {"0xC4F70679"}});
+    info.objectives.push_back(std::move(objective));
+    auto* layer = document.map().worldNode().defaultLayer();
+    document.setDahSceneReference(
+      std::move(info),
+      layer,
+      std::make_unique<EmptyObjectivePreview>(),
+      layer,
+      std::make_unique<EmptyObjectivePreview>(),
+      nullptr,
+      nullptr);
+    auto inspector = DahMapElements{document};
+    auto* tree = inspector.findChild<QTreeWidget*>("DahMapElements_GameplayTree");
+    REQUIRE(tree != nullptr);
+    auto named = [&](const QString& label) {
+      auto matches = std::vector<QTreeWidgetItem*>{};
+      for (auto item = QTreeWidgetItemIterator{tree}; *item; ++item)
+        if ((*item)->text(0) == label)
+          matches.push_back(*item);
+      return matches;
+    };
+    REQUIRE(named("kill_mutants").size() == 1);
+    CHECK(named("kill_mutants").front()->text(1).contains("no intrinsic map position"));
+    REQUIRE(named("tag: player_alien").size() == 1);
+    CHECK(
+      named("tag: player_alien").front()->text(1).contains("no resolved map position"));
+    CHECK_FALSE(named("tag: player_alien").front()->text(1).contains("x 0"));
+    CHECK_FALSE(named("kill_mutants").front()->data(0, Qt::UserRole + 2).isValid());
+    CHECK_FALSE(named("tag: player_alien").front()->data(0, Qt::UserRole + 2).isValid());
+    REQUIRE(named("region: b1_building").size() == 1);
+    const auto focusPosition =
+      named("region: b1_building").front()->data(0, Qt::UserRole + 2).toList();
+    REQUIRE(focusPosition.size() == 3);
+    CHECK(focusPosition[0].toDouble() == 25.0);
+    CHECK(focusPosition[1].toDouble() == 50.0);
+    CHECK(focusPosition[2].toDouble() == 75.0);
+    CHECK(named("world-placement:14:0001").size() == 1);
+    CHECK(named("world-placement:00:0940").size() == 1);
+    CHECK(
+      named("world-placement:00:0940")
+        .front()
+        ->data(0, Qt::UserRole + 2)
+        .toList()[0]
+        .toDouble()
+      == 12.0);
+    CHECK(
+      named("world-placement:14:0001").front()->data(0, Qt::UserRole + 3).toString()
+      == "world-placement:14:0001");
+    CHECK(named("world-placement:00:0940").front()->toolTip(0).contains("Double-click"));
+    CHECK(named("world-placement:02:0130").size() == 1);
+    CHECK(named("Collectible Probes (authored placements)").size() == 1);
+    CHECK(named("Mission Debris Pickups (authored placements)").size() == 1);
   }
 }
 

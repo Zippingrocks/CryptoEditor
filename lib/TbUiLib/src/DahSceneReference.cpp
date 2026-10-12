@@ -46,7 +46,9 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <functional>
+#include <numeric>
 #include <ranges>
 #include <stdexcept>
 #include <tuple>
@@ -120,8 +122,23 @@ vm::vec3f transformNormal(const vm::vec3f& normal, const std::array<double, 16>&
       normal.x() * matrix[1] + normal.y() * matrix[5] + normal.z() * matrix[9]),
     static_cast<float>(
       normal.x() * matrix[2] + normal.y() * matrix[6] + normal.z() * matrix[10])};
-  const auto length = vm::length(transformed);
-  return length > 0.000001f ? transformed / length : vm::vec3f{0.0f, 0.0f, 1.0f};
+  // Native DP3 consumes the authored normal length. Do not normalize away
+  // quantization or authored lengths. Sun preview below is gated to rigid bases.
+  return transformed;
+}
+
+bool hasRigidLightBasis(const std::array<double, 16>& matrix)
+{
+  for (size_t row = 0; row < 3; ++row)
+    for (size_t other = 0; other < 3; ++other)
+    {
+      auto dot = 0.0;
+      for (size_t axis = 0; axis < 3; ++axis)
+        dot += matrix[row * 4 + axis] * matrix[other * 4 + axis];
+      if (std::abs(dot - (row == other ? 1.0 : 0.0)) > 0.001)
+        return false;
+    }
+  return true;
 }
 
 vm::vec4f terrainDiffuseColor(const QByteArray& buffer, const std::uint64_t offset)
@@ -168,8 +185,46 @@ Color fallbackColor(const std::string& materialId)
 }
 
 std::shared_ptr<gl::TextureResource> loadTextureResource(
-  const std::filesystem::path& path, gl::ResourceManager& resourceManager)
+  const std::filesystem::path& path,
+  const std::vector<DahSceneTextureMip>& mips,
+  gl::ResourceManager& resourceManager)
 {
+  if (!mips.empty())
+  {
+    auto buffers = gl::TextureBufferList{};
+    auto average = Color{};
+    for (const auto& mip : mips)
+    {
+      const auto bytes = readBuffer(mip.path);
+      auto decoded = mdl::loadImageTextureFromMemory(
+        reinterpret_cast<const std::uint8_t*>(bytes.constData()),
+        static_cast<size_t>(bytes.size()));
+      if (decoded.is_error())
+        throw std::runtime_error{"Could not decode native texture mip"};
+      const auto& level = decoded.value();
+      if (level.width() != mip.width || level.height() != mip.height)
+        throw std::runtime_error{
+          "Decoded native texture mip dimensions differ from manifest"};
+      if (buffers.empty())
+        average = level.averageColor();
+      const auto& pixels = level.buffersIfLoaded().front();
+      buffers.emplace_back(pixels.size());
+      std::memcpy(buffers.back().data(), pixels.data(), pixels.size());
+    }
+    // These are authored native mipmaps, not generated brush-texture mipmaps.
+    // Leave generic binary-alpha detection out: native shader alpha testing
+    // controls cutouts and must not silently disable the remaining levels.
+    auto texture = gl::Texture{
+      static_cast<size_t>(mips.front().width),
+      static_cast<size_t>(mips.front().height),
+      average,
+      GL_RGBA,
+      gl::NoEmbeddedDefaults{},
+      std::move(buffers)};
+    auto resource = gl::createTextureResource(std::move(texture));
+    resourceManager.addResource(resource);
+    return resource;
+  }
   const auto bytes = readBuffer(path);
   auto textureResult = mdl::loadImageTextureFromMemory(
     reinterpret_cast<const std::uint8_t*>(bytes.constData()),
@@ -193,6 +248,11 @@ struct RenderBatch
   std::string alphaMode;
   float alphaReference;
   DahSceneRenderState state;
+  bool nativeSampler = false;
+  bool nearestMagnification = false;
+  bool mipFilter = true;
+  float lodBias = 0;
+  std::string lightRole;
 
   RenderBatch(
     std::vector<DahSceneReferenceBatch::Vertex> vertices,
@@ -219,10 +279,13 @@ class DahReferenceRenderer : public render::DirectRenderable
 {
 private:
   std::vector<RenderBatch> m_batches;
+  std::vector<DahSceneBatchSortInfo> m_sortInfo;
+  std::vector<DahSceneSun> m_suns;
 
 public:
   DahReferenceRenderer(DahSceneReference reference, gl::ResourceManager& resourceManager)
   {
+    m_suns = std::move(reference.suns);
     auto resources =
       std::unordered_map<std::string, std::shared_ptr<gl::TextureResource>>{};
     m_batches.reserve(reference.batches.size());
@@ -235,10 +298,30 @@ public:
         const auto [it, inserted] = resources.try_emplace(key);
         if (inserted)
         {
-          it->second = loadTextureResource(*batch.texturePreviewPath, resourceManager);
+          it->second = loadTextureResource(
+            *batch.texturePreviewPath, batch.textureMips, resourceManager);
         }
         textureResource = it->second;
       }
+      auto center = vm::vec3f{};
+      if (!batch.vertices.empty())
+      {
+        auto minimum = batch.vertices.front().attr;
+        auto maximum = minimum;
+        for (const auto& vertex : batch.vertices)
+          for (size_t axis = 0; axis < 3; ++axis)
+          {
+            minimum[axis] = std::min(minimum[axis], vertex.attr[axis]);
+            maximum[axis] = std::max(maximum[axis], vertex.attr[axis]);
+          }
+        center = (minimum + maximum) / 2.0f;
+      }
+      m_sortInfo.push_back(
+        {center,
+         batch.state.sky,
+         batch.alphaMode == "blend",
+         batch.state.nativeTerrain,
+         batch.state.terrainLayer});
       m_batches.emplace_back(
         std::move(batch.vertices),
         std::move(batch.materialId),
@@ -248,20 +331,13 @@ public:
         std::move(batch.alphaMode),
         batch.alphaReference,
         batch.state);
+      auto& rendered = m_batches.back();
+      rendered.nativeSampler = batch.nativeSampler;
+      rendered.nearestMagnification = batch.nearestMagnification;
+      rendered.mipFilter = batch.mipFilter && !batch.textureMips.empty();
+      rendered.lodBias = batch.lodBias;
+      rendered.lightRole = std::move(batch.lightRole);
     }
-    std::stable_sort(
-      m_batches.begin(), m_batches.end(), [](const auto& a, const auto& b) {
-        const auto order = [](const auto& batch) {
-          return batch.alphaMode != "blend" ? 0 : batch.state.nativeTerrain ? 1 : 2;
-        };
-        const auto key = [&](const auto& batch) {
-          return std::tuple{
-            order(batch),
-            batch.state.nativeTerrain ? 0 : 1,
-            batch.state.nativeTerrain ? batch.state.terrainLayer : 0};
-        };
-        return key(a) < key(b);
-      });
   }
 
   void prepare(gl::Gl& gl, gl::VboManager& vboManager) override
@@ -283,18 +359,11 @@ public:
     gl.polygonMode(GL_FRONT_AND_BACK, GL_FILL);
     gl.enable(GL_TEXTURE_2D);
     gl.activeTexture(GL_TEXTURE0);
-    shader.set("Brightness", prefs.get(Preferences::Brightness));
     shader.set("RenderGrid", context.showGrid());
     shader.set("GridSize", static_cast<float>(context.gridSize()));
     shader.set("GridAlpha", prefs.get(Preferences::GridAlpha));
     shader.set("Material", 0);
-    shader.set("ApplyTinting", false);
-    shader.set("ApplyVertexColor", true);
-    shader.set("GrayScale", false);
     shader.set("CameraPosition", context.camera().position());
-    shader.set("ShadeFaces", context.shadeFaces());
-    shader.set("ShowFog", context.showFog());
-    shader.set("Alpha", 1.0f);
     shader.set("EnableMasked", false);
     shader.set("AlphaFuncCompare", size_t{0});
     shader.set("AlphaFuncThreshold", 0.5f);
@@ -305,17 +374,45 @@ public:
       "SoftMapBoundsColor",
       RgbaF{prefs.get(Preferences::SoftMapBoundsColor).to<RgbF>(), 0.1f});
 
-    for (auto& batch : m_batches)
+    const auto order = dahSceneDrawOrder(
+      m_sortInfo, context.camera().position(), context.camera().direction());
+    for (const auto index : order)
     {
+      auto& batch = m_batches[index];
       const auto* texture = gl::getTexture(batch.material.get());
-      const auto applyMaterial = context.showMaterials() && texture != nullptr;
+      const auto applyMaterial =
+        context.showMaterials() && texture != nullptr && batch.state.pixelShader != 1;
       const auto blend = context.showMaterials() && batch.alphaMode == "blend";
+      shader.set("RenderGrid", context.showGrid() && !batch.state.sky);
       shader.set(
-        "Brightness",
-        batch.state.nativeTerrain ? 1.0f : prefs.get(Preferences::Brightness));
-      shader.set("ShadeFaces", !batch.state.nativeTerrain && context.shadeFaces());
-      // Editor fog is not DAH's environment fog and must not masquerade as it.
-      shader.set("ShowFog", false);
+        "ShowSoftMapBounds", !batch.state.sky && !context.softMapBounds().is_empty());
+      shader.set("CameraRelativeSky", batch.state.sky);
+      shader.set("NativeRgbScale", context.showMaterials() ? batch.state.rgbScale : 1.0f);
+      shader.set("LightingMode", context.showMaterials() ? batch.state.lightingMode : 0);
+      shader.set(
+        "MaterialDiffuse",
+        vm::vec3f{
+          batch.state.materialDiffuse[0],
+          batch.state.materialDiffuse[1],
+          batch.state.materialDiffuse[2]});
+      shader.set(
+        "MaterialAdditive",
+        vm::vec3f{
+          batch.state.materialAdditive[0],
+          batch.state.materialAdditive[1],
+          batch.state.materialAdditive[2]});
+      const auto& uv = batch.state.uvTransform;
+      shader.set("UvRow0", vm::vec4f{uv[0], uv[1], uv[2], uv[3]});
+      shader.set("UvRow1", vm::vec4f{uv[4], uv[5], uv[6], uv[7]});
+      const auto sun = std::ranges::find_if(
+        m_suns, [&](const auto& s) { return s.role == batch.lightRole; });
+      const auto vector = [](const std::array<float, 3>& a) {
+        return vm::vec3f{a[0], a[1], a[2]};
+      };
+      shader.set(
+        "SunDirection", sun != m_suns.end() ? vector(sun->direction) : vm::vec3f{});
+      shader.set("SunDiffuse", sun != m_suns.end() ? vector(sun->diffuse) : vm::vec3f{});
+      shader.set("SunAmbient", sun != m_suns.end() ? vector(sun->ambient) : vm::vec3f{});
       gl.depthFunc(GL_LEQUAL);
       auto* functions = QOpenGLContext::currentContext()->functions();
       const auto equation = batch.state.blendEquation == "reverse_subtract"
@@ -337,7 +434,9 @@ public:
         gl.disable(GL_BLEND);
       }
       gl.depthMask(
-        !context.showMaterials() || batch.state.depthWrite ? GL_TRUE : GL_FALSE);
+        !batch.state.sky && (!context.showMaterials() || batch.state.depthWrite)
+          ? GL_TRUE
+          : GL_FALSE);
       // Native opaque terrain still runs GREATER alpha testing (default 64/255).
       shader.set(
         "EnableMasked",
@@ -347,10 +446,20 @@ public:
       shader.set("AlphaFuncThreshold", batch.alphaReference);
       shader.set("ApplyMaterial", applyMaterial);
       shader.set(
-        "Color", applyMaterial ? Color{RgbaF{1.0f, 1.0f, 1.0f, 1.0f}} : batch.fallback);
+        "Color",
+        applyMaterial || batch.state.lightingMode != 0 || batch.state.pixelShader == 1
+          ? Color{RgbaF{1.0f, 1.0f, 1.0f, 1.0f}}
+          : batch.fallback);
       if (applyMaterial)
       {
-        batch.material->activate(gl, context.minFilterMode(), context.magFilterMode());
+        batch.material->activate(
+          gl,
+          batch.nativeSampler ? (batch.mipFilter ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR)
+                              : context.minFilterMode(),
+          batch.nativeSampler ? (batch.nearestMagnification ? GL_NEAREST : GL_LINEAR)
+                              : context.magFilterMode());
+        functions->glTexParameterf(
+          GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS, batch.nativeSampler ? batch.lodBias : 0.0f);
         gl.texParameteri(
           GL_TEXTURE_2D,
           GL_TEXTURE_WRAP_S,
@@ -382,6 +491,26 @@ public:
 
 } // namespace
 
+std::vector<size_t> dahSceneDrawOrder(
+  const std::vector<DahSceneBatchSortInfo>& batches,
+  const vm::vec3f& cameraPosition,
+  const vm::vec3f& cameraDirection)
+{
+  auto result = std::vector<size_t>(batches.size());
+  std::iota(result.begin(), result.end(), size_t{0});
+  const auto key = [&](const auto index) {
+    const auto& b = batches[index];
+    const auto pass = b.sky ? 0 : !b.blended ? 1 : b.terrain ? 2 : 3;
+    const auto depth =
+      pass == 3 ? -vm::dot(b.center - cameraPosition, cameraDirection) : 0.0f;
+    return std::tuple{pass, b.terrain ? 0 : 1, b.terrain ? b.terrainLayer : 0, depth};
+  };
+  std::stable_sort(result.begin(), result.end(), [&](const auto a, const auto b) {
+    return key(a) < key(b);
+  });
+  return result;
+}
+
 std::uint64_t DahSceneReference::vertexCount() const
 {
   auto result = std::uint64_t{0};
@@ -408,14 +537,15 @@ DahSceneReferenceResult buildDahSceneReference(
     {
       materials.emplace(material.id, &material);
     }
-    auto textures = std::unordered_map<std::string, std::filesystem::path>{};
+    auto textures = std::unordered_map<std::string, const DahSceneTexture*>{};
     for (const auto& texture : manifest.textures)
     {
-      textures.emplace(texture.id, texture.previewPath);
+      textures.emplace(texture.id, &texture);
     }
 
     auto result = DahSceneReference{};
     result.lodIndex = lodIndex;
+    result.suns = manifest.suns;
     auto batchIndices = std::unordered_map<std::string, size_t>{};
 
     auto haveBounds = false;
@@ -474,7 +604,8 @@ DahSceneReferenceResult buildDahSceneReference(
           appendPlacement(child, false);
         }
         // Components are not additional authored map entities.
-        result.placementCount -= lodIt->parts.size() - 1;
+        if (placement.editorCollection != "environment-sky")
+          result.placementCount -= lodIt->parts.size() - 1;
         return;
       }
       const auto geometryIt = geometries.find(lodIt->geometryId);
@@ -569,6 +700,36 @@ DahSceneReferenceResult buildDahSceneReference(
           state = lodIt->segmentStates.at(segmentIndex);
         if (geometry.kind != "static-world-object")
           state.rigidOpacity = 1.0f;
+        const auto& nativeMaterial = *materialIt->second;
+        if (
+          (geometry.kind == "static-world-object"
+           || geometry.kind == "human-reference-pose")
+          && nativeMaterial.actorParametersVerified)
+        {
+          state.uvTransform = nativeMaterial.actorUvTransform;
+          // Special/reflection and skin shader paths remain explicit fallbacks.
+          if (geometry.kind == "static-world-object" && nativeMaterial.pixelShader <= 1)
+          {
+            state.pixelShader = nativeMaterial.pixelShader;
+            state.materialDiffuse = nativeMaterial.diffuse;
+            state.materialAdditive = nativeMaterial.additive;
+            const auto haveSun = std::ranges::any_of(manifest.suns, [&](const auto& sun) {
+              return sun.role == placement.lightRole;
+            });
+            if (haveSun && hasRigidLightBasis(placement.matrix))
+            {
+              state.lightingMode = 1;
+              state.rgbScale = 2.0f;
+            }
+            if (placement.editorCollection == "environment-sky")
+            {
+              state.sky = true;
+              state.lightingMode = 2;
+              state.rgbScale = 2.0f;
+              state.depthWrite = false;
+            }
+          }
+        }
         ++segmentIndex;
         const auto batchKey =
           materialId + ":" + geometry.kind + ":" + std::to_string(state.terrainLayer)
@@ -576,12 +737,16 @@ DahSceneReferenceResult buildDahSceneReference(
           + ":" + state.blendDestination + ":" + std::to_string(state.depthWrite) + ":"
           + std::to_string(state.alphaReference) + ":" + std::to_string(state.rgbScale)
           + ":" + std::to_string(state.nativeTerrain) + ":"
-          + std::to_string(state.alphaTest) + ":" + std::to_string(state.rigidOpacity);
+          + std::to_string(state.alphaTest) + ":" + std::to_string(state.rigidOpacity)
+          + ":" + std::to_string(state.sky) + ":" + std::to_string(state.lightingMode)
+          + ":" + placement.lightRole
+          + (state.alphaMode == "blend" && !state.nativeTerrain ? ":" + placement.id : "");
         auto [batchIt, inserted] =
           batchIndices.try_emplace(batchKey, result.batches.size());
         if (inserted)
         {
           auto texturePreviewPath = std::optional<std::filesystem::path>{};
+          auto textureMips = std::vector<DahSceneTextureMip>{};
           if (materialIt->second->textureId)
           {
             const auto textureIt = textures.find(*materialIt->second->textureId);
@@ -589,7 +754,8 @@ DahSceneReferenceResult buildDahSceneReference(
             {
               throw std::runtime_error{"DAH scene material references missing texture"};
             }
-            texturePreviewPath = textureIt->second;
+            texturePreviewPath = textureIt->second->previewPath;
+            textureMips = textureIt->second->nativeMips;
             ++result.texturedMaterialCount;
           }
           result.batches.push_back(DahSceneReferenceBatch{
@@ -600,7 +766,13 @@ DahSceneReferenceResult buildDahSceneReference(
             {},
             state.alphaMode,
             state.alphaReference,
-            state});
+            state,
+            std::move(textureMips),
+            nativeMaterial.nativeSampler,
+            nativeMaterial.nearestMagnification,
+            nativeMaterial.mipFilter,
+            nativeMaterial.lodBias,
+            placement.lightRole});
         }
         auto& batch = result.batches[batchIt->second];
 
@@ -635,17 +807,17 @@ DahSceneReferenceResult buildDahSceneReference(
           const auto color = [&](const size_t index) {
             const auto& native = colors[index];
             return vm::vec4f{
-              native.x() * state.rgbScale,
-              native.y() * state.rgbScale,
-              native.z() * state.rgbScale,
-              native.w() * state.rigidOpacity};
+              native.x(), native.y(), native.z(), native.w() * state.rigidOpacity};
           };
           batch.vertices.emplace_back(a, normal0, uvs[index0], color(index0));
           batch.vertices.emplace_back(b, normal1, uvs[index1], color(index1));
           batch.vertices.emplace_back(c, normal2, uvs[index2], color(index2));
-          addToBounds(a);
-          addToBounds(b);
-          addToBounds(c);
+          if (!state.sky)
+          {
+            addToBounds(a);
+            addToBounds(b);
+            addToBounds(c);
+          }
           ++triangleCursor;
         }
       }
@@ -653,8 +825,13 @@ DahSceneReferenceResult buildDahSceneReference(
       {
         throw std::runtime_error{"DAH scene segments do not cover all triangles"};
       }
-      result.nativeTriangleCount += geometry.triangleCount;
-      ++result.placementCount;
+      if (placement.editorCollection == "environment-sky")
+        result.skyTriangleCount += geometry.triangleCount;
+      else
+      {
+        result.nativeTriangleCount += geometry.triangleCount;
+        ++result.placementCount;
+      }
     };
 
     for (const auto& placement : manifest.placements)
@@ -673,6 +850,8 @@ DahSceneReferenceResult buildDahSceneReference(
     {
       appendPlacement(placement, false);
     }
+    for (const auto& placement : manifest.skyPlacements)
+      appendPlacement(placement, false);
 
     if (!haveBounds)
     {
