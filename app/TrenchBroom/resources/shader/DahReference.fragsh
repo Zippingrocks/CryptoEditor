@@ -5,6 +5,8 @@
 uniform bool ApplyMaterial;
 uniform sampler2D Material;
 uniform float NativeRgbScale;
+uniform int NativePixelShader;
+uniform vec3 NativeFogColor;
 uniform bool RenderGrid;
 uniform float GridSize;
 uniform float GridAlpha;
@@ -12,6 +14,7 @@ varying vec4 modelCoordinates;
 varying vec3 modelNormal;
 varying vec4 faceColor;
 varying vec3 viewVector;
+varying float nativeFogAmount;
 
 bool passesAlphaFunc(float alpha);
 float grid(vec3 coords, vec3 normal, float gridSize, float minGridSize, float lineWidthFactor);
@@ -22,11 +25,23 @@ float texturedGridAlpha(float alpha);
 void main()
 {
   vec4 nativeColor = faceColor;
-  if (ApplyMaterial) nativeColor *= texture2D(Material, gl_TexCoord[0].st);
+  vec4 texture0 = vec4(1.0);
+  if (ApplyMaterial)
+  {
+    texture0 = texture2D(Material, gl_TexCoord[0].st);
+    nativeColor *= texture0;
+  }
+  // Retail shader 4 uses base-texture alpha as a reflection mask, not output
+  // alpha. Its final alpha is vertex alpha. The unresolved reflection term is
+  // intentionally omitted until generated t1 and live c5 are reconstructed.
+  if (NativePixelShader == 4) nativeColor.a = faceColor.a;
   if (!passesAlphaFunc(nativeColor.a)) discard;
   // Native pixel shaders 0/1 apply RGB2 AFTER interpolation and sampling.
   // Scaling vertex colors earlier changes saturated blends across triangles.
   nativeColor.rgb = clamp(NativeRgbScale * nativeColor.rgb, 0.0, 1.0);
+  // Retail mode 0 is linear camera-plane fog. This deliberately uses the
+  // vertex shader's forward coordinate rather than radial camera distance.
+  nativeColor.rgb = mix(nativeColor.rgb, NativeFogColor, nativeFogAmount);
   if (RenderGrid && GridAlpha > 0.0)
   {
     float change = max(length(dFdx(modelCoordinates.xyz)), length(dFdy(modelCoordinates.xyz)));

@@ -699,6 +699,14 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(scene.counts.geometries == 641);
       CHECK(scene.geometries.size() == 641);
       CHECK(scene.materials.size() == 792);
+      CHECK(
+        std::ranges::count_if(
+          scene.materials, [](const auto& material) { return material.pixelShader == 3; })
+        == 49);
+      CHECK(
+        std::ranges::count_if(
+          scene.materials, [](const auto& material) { return material.pixelShader == 4; })
+        == 19);
       CHECK(scene.textures.size() == 348);
       CHECK(scene.counts.humanPlacements == 295);
       CHECK(scene.counts.humanRenderablePlacements == 295);
@@ -710,6 +718,11 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(scene.objectives.size() == 146);
       REQUIRE(scene.skyPlacements.size() == 1);
       CHECK(scene.suns.size() == 2);
+      CHECK(scene.fog.enabled);
+      CHECK(scene.fog.profile == "alien");
+      CHECK(scene.fog.start == 0.0f);
+      CHECK(scene.fog.end == 250.0f);
+      CHECK(scene.fog.farPlane == 1000.0f);
       for (const auto& texture : scene.textures)
         CHECK_FALSE(texture.nativeMips.empty());
       CHECK(scene.placements.size() == 92);
@@ -735,6 +748,12 @@ TEST_CASE("DahSceneManifest", "[DahSceneManifest]")
       CHECK(reference.skyTriangleCount == 128);
       CHECK_FALSE(reference.batches.empty());
       CHECK(reference.texturedMaterialCount <= reference.batches.size());
+      CHECK(std::ranges::any_of(reference.batches, [](const auto& batch) {
+        return batch.state.pixelShader == 3 && batch.state.rgbScale == 2.0f;
+      }));
+      CHECK(std::ranges::any_of(reference.batches, [](const auto& batch) {
+        return batch.state.pixelShader == 4 && batch.state.rgbScale == 2.0f;
+      }));
 
       const auto lod1Result = buildDahSceneReference(scene, 1);
       REQUIRE(std::holds_alternative<DahSceneReference>(lod1Result));
@@ -875,9 +894,12 @@ TEST_CASE("DahSceneReference compiles the native GLSL program on a real GL conte
   INFO(program.log().toStdString());
   REQUIRE(linked);
   CHECK(program.uniformLocation("NativeRgbScale") >= 0);
+  CHECK(program.uniformLocation("NativePixelShader") >= 0);
   CHECK(program.uniformLocation("CameraRelativeSky") >= 0);
   CHECK(program.uniformLocation("SunDirection") >= 0);
   CHECK(program.uniformLocation("UvRow0") >= 0);
+  CHECK(program.uniformLocation("EnableNativeFog") >= 0);
+  CHECK(program.uniformLocation("NativeFogColor") >= 0);
   auto* functions = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_2_1>(&context);
   REQUIRE(functions != nullptr);
   REQUIRE(functions->initializeOpenGLFunctions());
@@ -907,10 +929,12 @@ TEST_CASE("DahSceneReference compiles the native GLSL program on a real GL conte
   program.setUniformValue("UvRow0", QVector4D{1, 0, 0, 0});
   program.setUniformValue("UvRow1", QVector4D{0, 1, 0, 0});
   program.setUniformValue("NativeRgbScale", 2.0f);
+  program.setUniformValue("NativePixelShader", 0);
   program.setUniformValue("LightingMode", 0);
   program.setUniformValue("RenderGrid", false);
   program.setUniformValue("ShowSoftMapBounds", false);
   program.setUniformValue("CameraRelativeSky", false);
+  program.setUniformValue("EnableNativeFog", false);
   program.setUniformValue("EnableMasked", true);
   program.setUniformValue("AlphaFuncCompare", 2);
   const auto drawPixel = [&]() {
@@ -937,6 +961,14 @@ TEST_CASE("DahSceneReference compiles the native GLSL program on a real GL conte
   }
   program.setUniformValue("AlphaFuncThreshold", 0.3f);
   CHECK(drawPixel() == std::array<unsigned char, 4>{0, 0, 0, 0});
+  program.setUniformValue("NativePixelShader", 4);
+  const auto reflectionBase = drawPixel();
+  for (size_t i = 0; i < 4; ++i)
+  {
+    const auto expected = std::array<int, 4>{192, 64, 16, 128}[i];
+    CHECK(std::abs(static_cast<int>(reflectionBase[i]) - expected) <= 1);
+  }
+  program.setUniformValue("NativePixelShader", 0);
   program.setUniformValue("AlphaFuncThreshold", 0.2f);
   program.setUniformValue("LightingMode", 2);
   program.setUniformValue("MaterialAdditive", QVector3D{0.25f, 0.5f, 0.75f});
@@ -959,6 +991,17 @@ TEST_CASE("DahSceneReference compiles the native GLSL program on a real GL conte
   for (size_t i = 0; i < 4; ++i)
     CHECK(
       std::abs(static_cast<int>(lit[i]) - std::array<int, 4>{70, 58, 20, 64}[i]) <= 1);
+  program.setUniformValue("LightingMode", 0);
+  program.setUniformValue("EnableNativeFog", true);
+  program.setUniformValue("CameraPosition", QVector3D{0, 0, 1});
+  program.setUniformValue("CameraDirection", QVector3D{0, 0, -1});
+  program.setUniformValue("NativeFogStart", 0.0f);
+  program.setUniformValue("NativeFogEnd", 1.0f);
+  program.setUniformValue("NativeFogColor", QVector3D{0.1f, 0.2f, 0.3f});
+  const auto fogged = drawPixel();
+  for (size_t i = 0; i < 4; ++i)
+    CHECK(
+      std::abs(static_cast<int>(fogged[i]) - std::array<int, 4>{26, 51, 77, 64}[i]) <= 1);
   functions->glDeleteTextures(1, &texture);
   program.release();
   framebuffer.release();

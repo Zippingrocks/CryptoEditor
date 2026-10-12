@@ -83,6 +83,16 @@ std::string optionalStringField(const QJsonObject& object, const char* key)
   return value.toString().toStdString();
 }
 
+float finiteFloatField(const QJsonObject& object, const char* key)
+{
+  const auto value = object.value(key);
+  if (
+    !value.isDouble() || !std::isfinite(value.toDouble())
+    || std::abs(value.toDouble()) > std::numeric_limits<float>::max())
+    throw JsonError{std::string{"Expected finite float field: "} + key};
+  return static_cast<float>(value.toDouble());
+}
+
 template <size_t N>
 std::array<float, N> finiteArrayField(const QJsonObject& object, const char* key)
 {
@@ -517,13 +527,23 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
             throw JsonError{"Unsupported native actor render state"};
           parsed.depthWrite = s.value("depth_write").toBool();
           parsed.alphaTest = s.value("alpha_test_enabled").toBool();
+          const auto shader = unsignedField(s, "native_pixel_shader_index");
+          if (shader > 255)
+            throw JsonError{"Invalid native pixel shader index"};
+          parsed.pixelShader = static_cast<int>(shader);
+          const auto baseScale = s.value("native_base_rgb_scale");
+          if (!baseScale.isUndefined() && !baseScale.isNull())
+          {
+            if (!baseScale.isDouble() || baseScale.toDouble() != 2.0)
+              throw JsonError{"Unsupported native pixel shader base scale"};
+            parsed.rgbScale = 2.0f;
+          }
           if (s.contains("material_opacity"))
           {
             const auto opacity = s.value("material_opacity");
             if (!opacity.isDouble() || !std::isfinite(opacity.toDouble()))
               throw JsonError{"Native material opacity must be finite"};
-            const auto shader = unsignedField(s, "native_pixel_shader_index");
-            if (shader == 0 || shader == 1)
+            if (shader == 0 || shader == 1 || shader == 3 || shader == 4)
               parsed.rigidOpacity =
                 static_cast<float>(std::clamp(opacity.toDouble(), 0.0, 1.0));
           }
@@ -922,6 +942,32 @@ DahSceneLoadResult loadDahSceneManifest(const std::filesystem::path& sceneDirect
     if (json.value("environment").isObject())
     {
       const auto environment = json.value("environment").toObject();
+      if (
+        environment.value("fog").isObject()
+        && environment.value("camera_profiles").isArray())
+      {
+        const auto fog = environment.value("fog").toObject();
+        result.fog.color = finiteArrayField<3>(fog, "color_rgb");
+        for (const auto& value : environment.value("camera_profiles").toArray())
+        {
+          if (!value.isObject())
+            throw JsonError{"Camera fog profile must be an object"};
+          const auto profile = value.toObject();
+          if (optionalStringField(profile, "mode") != "alien")
+            continue;
+          result.fog.profile = "alien";
+          result.fog.start = finiteFloatField(profile, "start");
+          result.fog.end = finiteFloatField(profile, "end");
+          result.fog.farPlane = finiteFloatField(profile, "farplane");
+          if (
+            result.fog.start < 0.0f || result.fog.end <= result.fog.start
+            || result.fog.farPlane < result.fog.end)
+            throw JsonError{"Native alien fog profile has invalid distances"};
+          result.fog.enabled = true;
+        }
+        if (!result.fog.enabled)
+          throw JsonError{"Native alien fog profile is missing"};
+      }
       if (environment.value("lighting_contract").isObject())
       {
         const auto lighting = environment.value("lighting_contract").toObject();

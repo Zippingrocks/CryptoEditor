@@ -190,13 +190,18 @@ and script execution are not simulated.
 The upgraded scene retains 2,674 world records, 79 buildings, 76 selected
 building fixtures, 15,121 scatter instances, and both terrain LODs. It contains
 641 geometries, 792 materials and 348 referenced textures including secondary
-shader dependencies. Those secondary reflection stages are preserved but not
-yet rendered. Retail assets remain read-only; no AI upscaling is used.
+shader dependencies. Reflection shaders 3/4 now use their decoded RGB2 base and
+exact output-alpha behavior; their secondary view-dependent term is preserved
+but remains disabled until generated t1 and live c5 are recovered. Retail assets
+remain read-only; no AI upscaling is used.
 
 Driver-backed regression coverage compiles/links the actual GLSL and checks
 pixel output for native RGB scaling, alpha rejection, camera-relative sky and
 authored lighting. This does not replace a matched in-game camera comparison.
-Fog, local lights, runtime sun/tint changes, shadows, reflection shaders and
+The viewport now applies Area 42's authored fog color with the executable-proven
+linear camera-forward coordinate and the retail alien camera profile's configured
+0..250 endpoint. It is not generic radial editor fog. UFO profile switching,
+local lights, runtime sun/tint changes, shadows, secondary reflection terms and
 the second sky visual remain explicitly unresolved.
 
 CryptoEditor reuses the editor's existing flat layers for map-wide visibility,

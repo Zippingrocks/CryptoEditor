@@ -222,6 +222,16 @@ struct DahSceneSun
   std::array<float, 3> ambient{};
 };
 
+struct DahSceneFog
+{
+  bool enabled = false;
+  std::string profile;
+  std::array<float, 3> color{};
+  float start = 0.0f;
+  float end = 1.0f;
+  float farPlane = 1.0f;
+};
+
 struct DahSceneCounts
 {
   std::uint64_t terrainPlacements = 0;
@@ -273,6 +283,7 @@ struct DahSceneManifest
   std::vector<DahScenePlacement> landingPlacements;
   std::vector<DahScenePlacement> skyPlacements;
   std::vector<DahSceneSun> suns;
+  DahSceneFog fog;
   std::vector<DahSceneMarker> markers;
   std::vector<DahSceneObjective> objectives;
   std::vector<DahSceneRegion> regions;

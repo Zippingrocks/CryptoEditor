@@ -8,6 +8,10 @@
 
 uniform vec4 Color;
 uniform vec3 CameraPosition;
+uniform vec3 CameraDirection;
+uniform bool EnableNativeFog;
+uniform float NativeFogStart;
+uniform float NativeFogEnd;
 uniform bool CameraRelativeSky;
 uniform int LightingMode;
 uniform vec3 SunDirection;
@@ -22,6 +26,7 @@ varying vec4 modelCoordinates;
 varying vec3 modelNormal;
 varying vec4 faceColor;
 varying vec3 viewVector;
+varying float nativeFogAmount;
 
 void main(void)
 {
@@ -46,4 +51,8 @@ void main(void)
     faceColor.rgb = MaterialAdditive;
   }
   viewVector = CameraPosition - gl_Vertex.xyz;
+  float forwardDistance = dot(gl_Vertex.xyz - CameraPosition, CameraDirection);
+  nativeFogAmount = EnableNativeFog
+    ? clamp((forwardDistance - NativeFogStart) / (NativeFogEnd - NativeFogStart), 0.0, 1.0)
+    : 0.0;
 }

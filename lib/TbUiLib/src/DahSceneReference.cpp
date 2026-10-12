@@ -281,11 +281,13 @@ private:
   std::vector<RenderBatch> m_batches;
   std::vector<DahSceneBatchSortInfo> m_sortInfo;
   std::vector<DahSceneSun> m_suns;
+  DahSceneFog m_fog;
 
 public:
   DahReferenceRenderer(DahSceneReference reference, gl::ResourceManager& resourceManager)
   {
     m_suns = std::move(reference.suns);
+    m_fog = std::move(reference.fog);
     auto resources =
       std::unordered_map<std::string, std::shared_ptr<gl::TextureResource>>{};
     m_batches.reserve(reference.batches.size());
@@ -364,6 +366,11 @@ public:
     shader.set("GridAlpha", prefs.get(Preferences::GridAlpha));
     shader.set("Material", 0);
     shader.set("CameraPosition", context.camera().position());
+    shader.set("CameraDirection", context.camera().direction());
+    shader.set(
+      "NativeFogColor", vm::vec3f{m_fog.color[0], m_fog.color[1], m_fog.color[2]});
+    shader.set("NativeFogStart", m_fog.start);
+    shader.set("NativeFogEnd", m_fog.end);
     shader.set("EnableMasked", false);
     shader.set("AlphaFuncCompare", size_t{0});
     shader.set("AlphaFuncThreshold", 0.5f);
@@ -387,7 +394,10 @@ public:
       shader.set(
         "ShowSoftMapBounds", !batch.state.sky && !context.softMapBounds().is_empty());
       shader.set("CameraRelativeSky", batch.state.sky);
+      shader.set(
+        "EnableNativeFog", context.showMaterials() && m_fog.enabled && !batch.state.sky);
       shader.set("NativeRgbScale", context.showMaterials() ? batch.state.rgbScale : 1.0f);
+      shader.set("NativePixelShader", batch.state.pixelShader);
       shader.set("LightingMode", context.showMaterials() ? batch.state.lightingMode : 0);
       shader.set(
         "MaterialDiffuse",
@@ -546,6 +556,7 @@ DahSceneReferenceResult buildDahSceneReference(
     auto result = DahSceneReference{};
     result.lodIndex = lodIndex;
     result.suns = manifest.suns;
+    result.fog = manifest.fog;
     auto batchIndices = std::unordered_map<std::string, size_t>{};
 
     auto haveBounds = false;
@@ -707,19 +718,23 @@ DahSceneReferenceResult buildDahSceneReference(
           && nativeMaterial.actorParametersVerified)
         {
           state.uvTransform = nativeMaterial.actorUvTransform;
-          // Special/reflection and skin shader paths remain explicit fallbacks.
-          if (geometry.kind == "static-world-object" && nativeMaterial.pixelShader <= 1)
+          // Reflection shaders 3/4 have a decoded base term; their secondary
+          // view-dependent term remains explicit in the manifest.
+          if (geometry.kind == "static-world-object")
           {
             state.pixelShader = nativeMaterial.pixelShader;
             state.materialDiffuse = nativeMaterial.diffuse;
             state.materialAdditive = nativeMaterial.additive;
-            const auto haveSun = std::ranges::any_of(manifest.suns, [&](const auto& sun) {
-              return sun.role == placement.lightRole;
-            });
-            if (haveSun && hasRigidLightBasis(placement.matrix))
+            if (nativeMaterial.pixelShader <= 1)
             {
-              state.lightingMode = 1;
-              state.rgbScale = 2.0f;
+              const auto haveSun = std::ranges::any_of(
+                manifest.suns,
+                [&](const auto& sun) { return sun.role == placement.lightRole; });
+              if (haveSun && hasRigidLightBasis(placement.matrix))
+              {
+                state.lightingMode = 1;
+                state.rgbScale = 2.0f;
+              }
             }
             if (placement.editorCollection == "environment-sky")
             {

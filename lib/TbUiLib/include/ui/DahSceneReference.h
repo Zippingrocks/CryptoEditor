@@ -85,6 +85,7 @@ struct DahSceneReference
   std::uint64_t texturedMaterialCount = 0;
   std::uint64_t skyTriangleCount = 0;
   std::vector<DahSceneSun> suns;
+  DahSceneFog fog;
 
   std::uint64_t vertexCount() const;
 };
